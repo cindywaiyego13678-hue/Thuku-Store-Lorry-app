@@ -45,6 +45,7 @@
       <div class="summary-box"><div class="label">Products in Store</div><div class="value" id="sum-products">—</div></div>
       <div class="summary-box"><div class="label">Store Stock Value (cost)</div><div class="value" id="sum-value">—</div></div>
       <div class="summary-box"><div class="label">Unpaid Transfers</div><div class="value" id="sum-unpaid" style="color:#dc2626;">—</div></div>
+      <div class="summary-box" id="profit-box" style="display:none;"><div class="label">Lorry Profit (Today)</div><div class="value" id="sum-profit" style="color:#059669;">—</div></div>
     </div>
 
     <div class="store-layout">
@@ -131,7 +132,22 @@
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
       await Promise.all([loadStoreProducts(), loadHistory()]);
+      if (currentStaff.role === 'admin') await loadLorryProfit();
     })();
+
+    async function loadLorryProfit() {
+      if (!navigator.onLine) return;
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      const { data, error } = await supabaseClient.rpc('get_lorry_profit_summary', {
+        p_start: start.toISOString(), p_end: end.toISOString()
+      });
+      if (error || !data || !data.length) return;
+      const box = document.getElementById('profit-box');
+      box.style.display = '';
+      document.getElementById('sum-profit').textContent = `Ksh ${Math.round(data[0].profit).toLocaleString()}`;
+    }
 
     function renderNav() {
       document.getElementById('nav-tabs').innerHTML = `
@@ -399,6 +415,9 @@
 
       if (error) { document.getElementById('history-table').innerHTML = '<div class="empty-state">Failed to load history.</div>'; return; }
 
+      // Pull real payment status from the shop app's incoming_transfers table
+      // (matched by transfer_ref = this transfer's id) — that's the source of truth
+      // since payment is confirmed on the shop side.
       const ids = (data || []).map(t => t.id.toString());
       let paymentMap = {};
       if (ids.length) {
