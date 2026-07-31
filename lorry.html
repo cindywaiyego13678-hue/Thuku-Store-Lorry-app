@@ -117,7 +117,7 @@
     }
 
     function displayName(p) {
-      return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+      return [p.size, p.name, p.density, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
     }
 
     async function loadStoreProducts() {
