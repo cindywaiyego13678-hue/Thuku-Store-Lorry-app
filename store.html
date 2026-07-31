@@ -126,7 +126,18 @@
     <div class="grid grid-2">
       <div class="field"><label>Name</label><input id="pm-name" placeholder="e.g. Mattress"></div>
       <div class="field"><label>Size (optional)</label><input id="pm-size" placeholder="e.g. 5x6"></div>
-      <div class="field"><label>Manufacturer / Brand</label><input id="pm-manufacturer" placeholder="e.g. Ndovu"></div>
+      <div class="field"><label>Manufacturer / Brand</label><input id="pm-manufacturer" placeholder="e.g. Ndovu, Tuff"></div>
+      <div class="field">
+        <label>Density (optional)</label>
+        <input id="pm-density" list="density-options" placeholder="e.g. High Density, Std, Med">
+        <datalist id="density-options">
+          <option value="High Density">
+          <option value="Medium Density">
+          <option value="Standard">
+          <option value="Normal Density">
+          <option value="Medium">
+        </datalist>
+      </div>
       <div class="field"><label>Type (optional)</label><input id="pm-category" placeholder="e.g. Bedding"></div>
       <div class="field"><label>Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
       <div class="field"><label>Reorder Level</label><input id="pm-reorder" type="number" min="0" step="any" placeholder="e.g. 5"></div>
@@ -210,16 +221,19 @@
         let totalRevenue = 0, totalCost = 0, totalProfit = 0;
         profitEl.innerHTML = `
           <table>
-            <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead>
+            <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty Sold</th><th>Cost Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
             <tbody>
               ${profitRows.map(r => {
                 totalRevenue += Number(r.revenue); totalCost += Number(r.cost); totalProfit += Number(r.profit);
                 return `
                   <tr>
+                    <td>${escapeHtml(r.brand)}</td>
                     <td>${escapeHtml(r.product_name)}</td>
+                    <td>${escapeHtml(r.size)}</td>
+                    <td>${escapeHtml(r.density)}</td>
                     <td>${r.quantity}</td>
-                    <td>Ksh ${Math.round(r.revenue).toLocaleString()}</td>
-                    <td>Ksh ${Math.round(r.cost).toLocaleString()}</td>
+                    <td>Ksh ${Math.round(r.cost_price).toLocaleString()}</td>
+                    <td>Ksh ${Math.round(r.selling_price).toLocaleString()}</td>
                     <td style="color:${r.profit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(r.profit).toLocaleString()}</td>
                   </tr>`;
               }).join('')}
@@ -289,7 +303,7 @@
     }
 
     function displayName(p) {
-      return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+      return [p.size, p.name, p.density, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
     }
 
     function renderStoreTable(rows) {
@@ -297,13 +311,14 @@
       if (!rows.length) { el.innerHTML = '<div class="empty-state">No products yet. Click "+ Add Product".</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Cost</th><th>Price</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Density</th><th>Cost</th><th>Price</th><th>Stock</th><th></th></tr></thead>
           <tbody>
             ${rows.map(p => {
               const low = p.stock_quantity <= (p.reorder_level ?? 5);
               return `
                 <tr>
-                  <td><strong>${escapeHtml(displayName(p))}</strong>${p.category ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.category)}</div>` : ''}</td>
+                  <td><strong>${escapeHtml([p.size, p.name].filter(Boolean).join(' '))}</strong>${p.manufacturer ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.manufacturer)}</div>` : ''}${p.category ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.category)}</div>` : ''}</td>
+                  <td>${p.density ? escapeHtml(p.density) : '—'}</td>
                   <td>Ksh ${Number(p.cost || 0).toLocaleString()}</td>
                   <td>Ksh ${Number(p.price).toLocaleString()}</td>
                   <td><span class="badge ${low ? 'low' : 'in_stock'}">${p.stock_quantity}</span></td>
@@ -339,7 +354,7 @@
     function openProductModal() {
       document.getElementById('pm-title').textContent = '+ Add Product';
       document.getElementById('pm-id').value = '';
-      ['pm-name','pm-size','pm-manufacturer','pm-category','pm-stock','pm-reorder','pm-cost','pm-price'].forEach(id => document.getElementById(id).value = '');
+      ['pm-name','pm-size','pm-manufacturer','pm-density','pm-category','pm-stock','pm-reorder','pm-cost','pm-price'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('pm-reorder').value = 5;
       document.getElementById('pm-error').style.display = 'none';
       document.getElementById('product-modal').style.display = 'block';
@@ -354,6 +369,7 @@
       document.getElementById('pm-name').value = p.name || '';
       document.getElementById('pm-size').value = p.size || '';
       document.getElementById('pm-manufacturer').value = p.manufacturer || '';
+      document.getElementById('pm-density').value = p.density || '';
       document.getElementById('pm-category').value = p.category || '';
       document.getElementById('pm-stock').value = p.stock_quantity ?? 0;
       document.getElementById('pm-reorder').value = p.reorder_level ?? 5;
@@ -377,6 +393,7 @@
       const name = document.getElementById('pm-name').value.trim();
       const size = document.getElementById('pm-size').value.trim();
       const manufacturer = document.getElementById('pm-manufacturer').value.trim();
+      const density = document.getElementById('pm-density').value.trim();
       const category = document.getElementById('pm-category').value.trim();
       const stock_quantity = parseFloat(document.getElementById('pm-stock').value);
       const reorder_level = parseFloat(document.getElementById('pm-reorder').value);
@@ -393,7 +410,7 @@
       btn.disabled = true; btn.textContent = 'Saving...';
 
       const payload = {
-        name, size: size || null, manufacturer: manufacturer || null, category: category || null,
+        name, size: size || null, manufacturer: manufacturer || null, density: density || null, category: category || null,
         stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
         reorder_level: isNaN(reorder_level) ? 5 : reorder_level,
         cost: isNaN(cost) ? 0 : cost,
@@ -572,4 +589,3 @@
   </script>
 </body>
 </html>
-
