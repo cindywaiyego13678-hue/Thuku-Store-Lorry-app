@@ -278,11 +278,16 @@
     }
 
     function renderNav() {
-      document.getElementById('nav-tabs').innerHTML = `
-        <a href="store.html" class="active">Store</a>
-        <a href="lorry.html">Lorry</a>
-      `;
-    }
+  const tabs = [
+    { href: 'store.html', label: 'Store' },
+    { href: 'lorry.html', label: 'Lorry' }
+  ];
+  if (currentStaff.role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+  tabs.push({ href: 'reports.html', label: 'Reports' });
+  document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+    `<a href="${t.href}" class="${t.href === 'store.html' ? 'active' : ''}">${t.label}</a>`
+  ).join('');
+}
 
     // ─── STORE INVENTORY ────────────────────────────────────────────────────
     async function loadStoreProducts() {
