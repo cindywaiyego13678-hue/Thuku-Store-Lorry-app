@@ -96,16 +96,22 @@
 
     <div class="card" id="report-card" style="display:none; margin-top:18px;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
-        <h3 style="margin:0;">📊 Daily Report</h3>
+        <h3 style="margin:0;">📊 Daily Report — Whole Store</h3>
         <div style="display:flex; gap:8px; align-items:center;">
           <input type="date" id="report-date" style="padding:6px 10px; border:1px solid var(--border,#e2e8f0); border-radius:6px;">
           <button onclick="loadDailyReport()" style="margin:0;">Load Report</button>
         </div>
       </div>
 
-      <h4 style="margin:16px 0 8px;">Profit by Product</h4>
+      <h4 style="margin:16px 0 8px;">Lorry Sales — Profit by Product</h4>
       <div id="report-profit-table"><div class="empty-state">Pick a date and click "Load Report".</div></div>
-      <div id="report-profit-total" style="text-align:right; font-weight:800; margin-top:8px; font-size:1.05rem;"></div>
+      <div id="report-profit-total" style="text-align:right; font-weight:700; margin-top:8px;"></div>
+
+      <h4 style="margin:24px 0 8px;">Store → Shop Transfers — Profit by Product</h4>
+      <div id="report-transfer-table"><div class="empty-state">—</div></div>
+      <div id="report-transfer-total" style="text-align:right; font-weight:700; margin-top:8px;"></div>
+
+      <div style="text-align:right; font-weight:800; margin-top:16px; padding-top:14px; border-top:2px solid var(--border,#e2e8f0); font-size:1.15rem;" id="report-grand-total"></div>
 
       <h4 style="margin:24px 0 8px;">Returns — Goods & Cause</h4>
       <div id="report-returns-table"><div class="empty-state">—</div></div>
@@ -204,44 +210,59 @@
       return { start: start.toISOString(), end: end.toISOString() };
     }
 
+    function renderProfitTable(rows, tableElId, totalElId, emptyMsg) {
+      const el = document.getElementById(tableElId);
+      if (!rows || !rows.length) {
+        el.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
+        document.getElementById(totalElId).textContent = '';
+        return { revenue: 0, cost: 0, profit: 0 };
+      }
+      let totalRevenue = 0, totalCost = 0, totalProfit = 0;
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty</th><th>Cost Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              totalRevenue += Number(r.revenue); totalCost += Number(r.cost); totalProfit += Number(r.profit);
+              return `
+                <tr>
+                  <td>${escapeHtml(r.brand)}</td>
+                  <td>${escapeHtml(r.product_name)}</td>
+                  <td>${escapeHtml(r.size)}</td>
+                  <td>${escapeHtml(r.density)}</td>
+                  <td>${r.quantity}</td>
+                  <td>Ksh ${Math.round(r.cost_price).toLocaleString()}</td>
+                  <td>Ksh ${Math.round(r.selling_price).toLocaleString()}</td>
+                  <td style="color:${r.profit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(r.profit).toLocaleString()}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+      document.getElementById(totalElId).innerHTML =
+        `Subtotal — Revenue: Ksh ${Math.round(totalRevenue).toLocaleString()} · Cost: Ksh ${Math.round(totalCost).toLocaleString()} · <span style="color:${totalProfit >= 0 ? '#059669' : '#dc2626'};">Profit: Ksh ${Math.round(totalProfit).toLocaleString()}</span>`;
+      return { revenue: totalRevenue, cost: totalCost, profit: totalProfit };
+    }
+
     async function loadDailyReport() {
       if (!navigator.onLine) return;
       const dateStr = document.getElementById('report-date').value;
       if (!dateStr) return;
       const { start, end } = dayRangeFor(dateStr);
 
-      // ── Profit by product ──
-      const profitEl = document.getElementById('report-profit-table');
-      const { data: profitRows, error: profitErr } = await supabaseClient.rpc('get_lorry_profit_breakdown', { p_start: start, p_end: end });
-      if (profitErr) { profitEl.innerHTML = `<div class="empty-state">Error: ${escapeHtml(profitErr.message)}</div>`; }
-      else if (!profitRows || !profitRows.length) {
-        profitEl.innerHTML = '<div class="empty-state">No lorry sales on this date.</div>';
-        document.getElementById('report-profit-total').textContent = '';
-      } else {
-        let totalRevenue = 0, totalCost = 0, totalProfit = 0;
-        profitEl.innerHTML = `
-          <table>
-            <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty Sold</th><th>Cost Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
-            <tbody>
-              ${profitRows.map(r => {
-                totalRevenue += Number(r.revenue); totalCost += Number(r.cost); totalProfit += Number(r.profit);
-                return `
-                  <tr>
-                    <td>${escapeHtml(r.brand)}</td>
-                    <td>${escapeHtml(r.product_name)}</td>
-                    <td>${escapeHtml(r.size)}</td>
-                    <td>${escapeHtml(r.density)}</td>
-                    <td>${r.quantity}</td>
-                    <td>Ksh ${Math.round(r.cost_price).toLocaleString()}</td>
-                    <td>Ksh ${Math.round(r.selling_price).toLocaleString()}</td>
-                    <td style="color:${r.profit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(r.profit).toLocaleString()}</td>
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>`;
-        document.getElementById('report-profit-total').innerHTML =
-          `Total — Revenue: Ksh ${Math.round(totalRevenue).toLocaleString()} · Cost: Ksh ${Math.round(totalCost).toLocaleString()} · <span style="color:${totalProfit >= 0 ? '#059669' : '#dc2626'};">Profit: Ksh ${Math.round(totalProfit).toLocaleString()}</span>`;
-      }
+      // ── Lorry sales profit ──
+      const { data: lorryRows, error: lorryErr } = await supabaseClient.rpc('get_lorry_profit_breakdown', { p_start: start, p_end: end });
+      if (lorryErr) { document.getElementById('report-profit-table').innerHTML = `<div class="empty-state">Error: ${escapeHtml(lorryErr.message)}</div>`; }
+      const lorryTotals = lorryErr ? { revenue: 0, cost: 0, profit: 0 } : renderProfitTable(lorryRows, 'report-profit-table', 'report-profit-total', 'No lorry sales on this date.');
+
+      // ── Store → Shop transfer profit ──
+      const { data: transferRows, error: transferErr } = await supabaseClient.rpc('get_store_transfer_profit_breakdown', { p_start: start, p_end: end });
+      if (transferErr) { document.getElementById('report-transfer-table').innerHTML = `<div class="empty-state">Error: ${escapeHtml(transferErr.message)}</div>`; }
+      const transferTotals = transferErr ? { revenue: 0, cost: 0, profit: 0 } : renderProfitTable(transferRows, 'report-transfer-table', 'report-transfer-total', 'No transfers to the shop on this date.');
+
+      // ── Combined grand total for the whole store ──
+      const grandProfit = lorryTotals.profit + transferTotals.profit;
+      document.getElementById('report-grand-total').innerHTML =
+        `Whole Store Profit (Lorry + Transfers): <span style="color:${grandProfit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(grandProfit).toLocaleString()}</span>`;
 
       // ── Returns detail ──
       const returnsEl = document.getElementById('report-returns-table');
@@ -278,16 +299,11 @@
     }
 
     function renderNav() {
-  const tabs = [
-    { href: 'store.html', label: 'Store' },
-    { href: 'lorry.html', label: 'Lorry' }
-  ];
-  if (currentStaff.role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
-  tabs.push({ href: 'reports.html', label: 'Reports' });
-  document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
-    `<a href="${t.href}" class="${t.href === 'store.html' ? 'active' : ''}">${t.label}</a>`
-  ).join('');
-}
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="store.html" class="active">Store</a>
+        <a href="lorry.html">Lorry</a>
+      `;
+    }
 
     // ─── STORE INVENTORY ────────────────────────────────────────────────────
     async function loadStoreProducts() {
