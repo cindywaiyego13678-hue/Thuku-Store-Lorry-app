@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — Thuku Store &amp; Lorry</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <button id="install-btn" style="display:none; position:fixed; bottom:16px; right:16px; z-index:9999; background:#1a7a4a; color:#fff; border:none; padding:12px 18px; border-radius:8px; font-size:0.95rem; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+    📲 Install App
+  </button>
+
+  <div class="login-wrap">
+    <div class="card login-card">
+      <h1>Thuku Store &amp; Lorry</h1>
+      <p class="sub">Sign in to continue — same login as the shop app if you're an admin.</p>
+
+      <div id="login-form">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="email" placeholder="you@thuku.com">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="password" placeholder="••••••••">
+        </div>
+        <button id="login-btn" style="width:100%">Sign In</button>
+        <p class="error-text" id="error-msg" style="display:none;"></p>
+        <p style="color:#6b7280; font-size:0.82rem; margin-top:14px; text-align:center;">
+          New store or lorry staff accounts are created by the admin from the Staff page in the shop app.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    (async () => {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        const staff = await getCurrentStaff();
+        if (staff) {
+          window.location.href = (staff.role === 'lorry_seller') ? 'lorry.html' : 'store.html';
+          return;
+        }
+      }
+    })();
+
+    document.getElementById('login-btn').addEventListener('click', login);
+    document.getElementById('password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') login();
+    });
+
+    async function login() {
+      const email    = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const errorEl  = document.getElementById('error-msg');
+      errorEl.style.display = 'none';
+
+      if (!email || !password) {
+        errorEl.textContent = 'Please enter email and password.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('login-btn');
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) {
+        errorEl.textContent = error.message;
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        return;
+      }
+
+      const staff = await getCurrentStaff();
+      if (!staff) {
+        errorEl.textContent = 'No staff profile found. Contact the admin.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        await supabaseClient.auth.signOut();
+        return;
+      }
+      if (!['admin','store_staff','lorry_seller'].includes(staff.role)) {
+        errorEl.textContent = 'This account does not have access to the Store & Lorry app.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+        await supabaseClient.auth.signOut();
+        return;
+      }
+
+      window.location.href = (staff.role === 'lorry_seller') ? 'lorry.html' : 'store.html';
+    }
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => console.log('Service worker registered:', reg.scope))
+          .catch(err => console.error('Service worker registration failed:', err));
+      });
+    }
+  </script>
+
+  <script>
+    let deferredPrompt;
+    const installBtn = document.getElementById('install-btn');
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = 'block';
+    });
+    installBtn.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      installBtn.style.display = 'none';
+      await deferredPrompt.prompt();
+      deferredPrompt = null;
+    });
+    window.addEventListener('appinstalled', () => { installBtn.style.display = 'none'; });
+  </script>
+</body>
+</html>
