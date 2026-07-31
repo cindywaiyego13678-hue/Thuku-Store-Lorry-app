@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Store — Thuku Store &amp; Lorry</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .store-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .store-layout { grid-template-columns: 1fr; } }
+  .transfer-item-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border,#e2e8f0); font-size:0.9rem; gap:10px; }
+  .transfer-item-row:last-child { border-bottom:none; }
+  .transfer-item-name { flex:1; font-weight:600; }
+  .transfer-qty-input { width:70px; padding:4px 8px; border:1px solid var(--border,#e2e8f0); border-radius:6px; font-size:0.9rem; }
+  .transfer-items-box { border:1px solid var(--border,#e2e8f0); border-radius:8px; padding:8px 12px; min-height:80px; max-height:220px; overflow-y:auto; margin:10px 0; background:var(--bg,#f8fafc); }
+  .empty-transfer { text-align:center; color:var(--muted,#6b7280); padding:20px 0; font-size:0.9rem; }
+  .summary-row { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+  .summary-box { flex:1; min-width:120px; background:var(--bg,#f8fafc); border-radius:10px; padding:12px 16px; text-align:center; }
+  .summary-box .label { font-size:0.78rem; color:var(--muted,#6b7280); }
+  .summary-box .value { font-size:1.4rem; font-weight:800; margin-top:2px; }
+  .pay-badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.75rem; font-weight:700; }
+  .pay-paid { background:#d1fae5; color:#065f46; }
+  .pay-unpaid { background:#fee2e2; color:#991b1b; }
+  .pay-partial { background:#fef3c7; color:#92400e; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🏭 Store</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div id="low-stock-banner" style="display:none; background:#fef3c7; color:#92400e; border-radius:8px; padding:10px 14px; font-size:0.9rem; margin-bottom:16px; font-weight:600;"></div>
+
+    <div class="summary-row">
+      <div class="summary-box"><div class="label">Products in Store</div><div class="value" id="sum-products">—</div></div>
+      <div class="summary-box"><div class="label">Store Stock Value (cost)</div><div class="value" id="sum-value">—</div></div>
+      <div class="summary-box"><div class="label">Unpaid Transfers</div><div class="value" id="sum-unpaid" style="color:#dc2626;">—</div></div>
+    </div>
+
+    <div class="store-layout">
+
+      <!-- LEFT: Store inventory -->
+      <div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0;">📦 Store Inventory</h3>
+            <button onclick="openProductModal()">+ Add Product</button>
+          </div>
+          <div class="field"><input type="text" id="store-search" placeholder="Search by name, size, or manufacturer..."></div>
+          <div id="store-table"><div class="empty-state">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Transfer to shop + history -->
+      <div>
+        <div class="card" style="margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">🚚 Transfer to Shop</h3>
+            <button class="secondary" onclick="clearTransfer()" style="font-size:0.8rem; padding:5px 10px;">Clear</button>
+          </div>
+          <div class="field">
+            <label>Select product</label>
+            <select id="product-select"><option value="">— choose a product —</option></select>
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-end;">
+            <div class="field" style="flex:1; margin:0;">
+              <label>Quantity to transfer</label>
+              <input type="number" id="transfer-qty" min="0.01" step="any" placeholder="e.g. 5">
+            </div>
+            <button onclick="addTransferItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
+          </div>
+          <div class="transfer-items-box" id="transfer-items-box"><div class="empty-transfer">No items added yet.</div></div>
+          <div class="field"><label>Notes (optional)</label><input type="text" id="transfer-notes" placeholder="e.g. Morning delivery — Friday"></div>
+          <button onclick="submitTransfer()" id="submit-transfer-btn" style="width:100%; margin-top:4px;">✅ Send to Shop</button>
+          <p class="error-text" id="transfer-error" style="display:none;"></p>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">📋 Transfer History</h3>
+          <div id="history-table"><div class="empty-state">Loading...</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Product Modal -->
+  <div id="product-modal" class="card" style="display:none; position:fixed; top:8%; left:50%; transform:translateX(-50%); width:92%; max-width:460px; z-index:50; max-height:84vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <h3 style="margin:0;" id="pm-title">+ Add Product</h3>
+      <button class="secondary" onclick="closeProductModal()">Close</button>
+    </div>
+    <p style="color:var(--muted); font-size:0.85rem; margin-top:-10px;">
+      Use size + manufacturer to tell apart variants, e.g. "5x6 Mattress — Ndovu" vs "5x6 Mattress — Tuff".
+    </p>
+    <input type="hidden" id="pm-id">
+    <div class="grid grid-2">
+      <div class="field"><label>Name</label><input id="pm-name" placeholder="e.g. Mattress"></div>
+      <div class="field"><label>Size (optional)</label><input id="pm-size" placeholder="e.g. 5x6"></div>
+      <div class="field"><label>Manufacturer / Brand</label><input id="pm-manufacturer" placeholder="e.g. Ndovu"></div>
+      <div class="field"><label>Type (optional)</label><input id="pm-category" placeholder="e.g. Bedding"></div>
+      <div class="field"><label>Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
+      <div class="field"><label>Reorder Level</label><input id="pm-reorder" type="number" min="0" step="any" placeholder="e.g. 5"></div>
+      <div class="field"><label>Cost Price (Ksh)</label><input id="pm-cost" type="number" placeholder="e.g. 8000"></div>
+      <div class="field"><label>Selling Price (Ksh)</label><input id="pm-price" type="number" placeholder="e.g. 12000"></div>
+    </div>
+    <button onclick="saveProduct()" id="pm-save-btn" style="width:100%;">Save Product</button>
+    <p class="error-text" id="pm-error" style="display:none;"></p>
+  </div>
+  <div id="product-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:40;" onclick="closeProductModal()"></div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    let currentStaff = null;
+    let storeProducts = [];
+    let transferItems = [];
+
+    (async () => {
+      currentStaff = await requireAuth(['admin','store_staff']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav();
+      await Promise.all([loadStoreProducts(), loadHistory()]);
+    })();
+
+    function renderNav() {
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="store.html" class="active">Store</a>
+        <a href="lorry.html">Lorry</a>
+      `;
+    }
+
+    // ─── STORE INVENTORY ────────────────────────────────────────────────────
+    async function loadStoreProducts() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('store_products');
+        if (cached) { storeProducts = cached.data; renderStoreTable(storeProducts); updateSummary(); populateProductSelect(); }
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from('store_products').select('*').eq('is_active', true).order('name');
+      if (error) { console.error(error); return; }
+      storeProducts = data || [];
+      cacheSet('store_products', storeProducts);
+      renderStoreTable(storeProducts);
+      updateSummary();
+      populateProductSelect();
+      updateLowStockBanner();
+    }
+
+    function displayName(p) {
+      return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+    }
+
+    function renderStoreTable(rows) {
+      const el = document.getElementById('store-table');
+      if (!rows.length) { el.innerHTML = '<div class="empty-state">No products yet. Click "+ Add Product".</div>'; return; }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Product</th><th>Cost</th><th>Price</th><th>Stock</th><th></th></tr></thead>
+          <tbody>
+            ${rows.map(p => {
+              const low = p.stock_quantity <= (p.reorder_level ?? 5);
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(displayName(p))}</strong>${p.category ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.category)}</div>` : ''}</td>
+                  <td>Ksh ${Number(p.cost || 0).toLocaleString()}</td>
+                  <td>Ksh ${Number(p.price).toLocaleString()}</td>
+                  <td><span class="badge ${low ? 'low' : 'in_stock'}">${p.stock_quantity}</span></td>
+                  <td><button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='editProduct(${JSON.stringify(p.id)})'>Edit</button></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    document.getElementById('store-search').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      renderStoreTable(storeProducts.filter(p => displayName(p).toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q)));
+    });
+
+    function updateSummary() {
+      document.getElementById('sum-products').textContent = storeProducts.length;
+      const value = storeProducts.reduce((s, p) => s + (Number(p.cost || 0) * Number(p.stock_quantity || 0)), 0);
+      document.getElementById('sum-value').textContent = `Ksh ${Math.round(value).toLocaleString()}`;
+    }
+
+    function updateLowStockBanner() {
+      const banner = document.getElementById('low-stock-banner');
+      const low = storeProducts.filter(p => p.stock_quantity <= (p.reorder_level ?? 5));
+      if (!low.length) { banner.style.display = 'none'; return; }
+      const names = low.slice(0,4).map(p => escapeHtml(displayName(p))).join(', ');
+      const extra = low.length > 4 ? ` and ${low.length-4} more` : '';
+      banner.innerHTML = `⚠️ Low stock in store: ${names}${extra}`;
+      banner.style.display = 'block';
+    }
+
+    // ─── ADD / EDIT PRODUCT ─────────────────────────────────────────────────
+    function openProductModal() {
+      document.getElementById('pm-title').textContent = '+ Add Product';
+      document.getElementById('pm-id').value = '';
+      ['pm-name','pm-size','pm-manufacturer','pm-category','pm-stock','pm-reorder','pm-cost','pm-price'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('pm-reorder').value = 5;
+      document.getElementById('pm-error').style.display = 'none';
+      document.getElementById('product-modal').style.display = 'block';
+      document.getElementById('product-modal-overlay').style.display = 'block';
+    }
+
+    function editProduct(id) {
+      const p = storeProducts.find(x => x.id === id);
+      if (!p) return;
+      document.getElementById('pm-title').textContent = 'Edit Product';
+      document.getElementById('pm-id').value = p.id;
+      document.getElementById('pm-name').value = p.name || '';
+      document.getElementById('pm-size').value = p.size || '';
+      document.getElementById('pm-manufacturer').value = p.manufacturer || '';
+      document.getElementById('pm-category').value = p.category || '';
+      document.getElementById('pm-stock').value = p.stock_quantity ?? 0;
+      document.getElementById('pm-reorder').value = p.reorder_level ?? 5;
+      document.getElementById('pm-cost').value = p.cost ?? '';
+      document.getElementById('pm-price').value = p.price ?? '';
+      document.getElementById('pm-error').style.display = 'none';
+      document.getElementById('product-modal').style.display = 'block';
+      document.getElementById('product-modal-overlay').style.display = 'block';
+    }
+
+    function closeProductModal() {
+      document.getElementById('product-modal').style.display = 'none';
+      document.getElementById('product-modal-overlay').style.display = 'none';
+    }
+
+    async function saveProduct() {
+      const errorEl = document.getElementById('pm-error');
+      errorEl.style.display = 'none';
+
+      const id = document.getElementById('pm-id').value;
+      const name = document.getElementById('pm-name').value.trim();
+      const size = document.getElementById('pm-size').value.trim();
+      const manufacturer = document.getElementById('pm-manufacturer').value.trim();
+      const category = document.getElementById('pm-category').value.trim();
+      const stock_quantity = parseFloat(document.getElementById('pm-stock').value);
+      const reorder_level = parseFloat(document.getElementById('pm-reorder').value);
+      const cost = parseFloat(document.getElementById('pm-cost').value);
+      const price = parseFloat(document.getElementById('pm-price').value);
+
+      if (!name || isNaN(price)) {
+        errorEl.textContent = 'Name and selling price are required.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      const btn = document.getElementById('pm-save-btn');
+      btn.disabled = true; btn.textContent = 'Saving...';
+
+      const payload = {
+        name, size: size || null, manufacturer: manufacturer || null, category: category || null,
+        stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
+        reorder_level: isNaN(reorder_level) ? 5 : reorder_level,
+        cost: isNaN(cost) ? 0 : cost,
+        price
+      };
+
+      const { error } = id
+        ? await supabaseClient.from('store_products').update(payload).eq('id', id)
+        : await supabaseClient.from('store_products').insert({ ...payload, is_active: true });
+
+      btn.disabled = false; btn.textContent = 'Save Product';
+
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      closeProductModal();
+      await loadStoreProducts();
+    }
+
+    // ─── TRANSFER TO SHOP ───────────────────────────────────────────────────
+    function populateProductSelect() {
+      document.getElementById('product-select').innerHTML =
+        '<option value="">— choose a product —</option>' +
+        storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-cost="${p.cost||0}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
+    }
+
+    function addTransferItem() {
+      const select = document.getElementById('product-select');
+      const productId = select.value;
+      const qty = parseFloat(document.getElementById('transfer-qty').value);
+      const errorEl = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+
+      const product = storeProducts.find(p => p.id === productId);
+      if (!product) return;
+      const existing = transferItems.find(i => i.store_product_id === productId);
+      const alreadyQty = existing ? existing.quantity : 0;
+      if (alreadyQty + qty > product.stock_quantity) {
+        errorEl.textContent = `Store only has ${product.stock_quantity} unit(s) of "${displayName(product)}". You've already added ${alreadyQty}.`;
+        errorEl.style.display = 'block'; return;
+      }
+
+      if (existing) {
+        existing.quantity += qty;
+      } else {
+        transferItems.push({
+          store_product_id: productId,
+          product_name: displayName(product),
+          quantity: qty,
+          unit_cost: product.cost || 0,
+          unit_price: product.price,
+          store_qty: product.stock_quantity
+        });
+      }
+      select.value = '';
+      document.getElementById('transfer-qty').value = '';
+      renderTransferItems();
+    }
+
+    function renderTransferItems() {
+      const box = document.getElementById('transfer-items-box');
+      if (!transferItems.length) { box.innerHTML = '<div class="empty-transfer">No items added yet.</div>'; return; }
+      box.innerHTML = transferItems.map((item, idx) => `
+        <div class="transfer-item-row">
+          <div style="flex:1;">
+            <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
+            <div style="font-size:0.78rem; color:var(--muted);">Store stock: ${item.store_qty}</div>
+          </div>
+          <input class="transfer-qty-input" type="number" min="0.01" step="any" value="${item.quantity}" onchange="updateItemQty(${idx}, this.value)">
+          <button class="secondary danger" style="padding:4px 8px; font-size:0.78rem; margin:0;" onclick="removeTransferItem(${idx})">✕</button>
+        </div>`).join('');
+    }
+
+    function updateItemQty(idx, rawVal) {
+      const errorEl = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+      const qty = parseFloat(rawVal);
+      if (!qty || qty <= 0) { removeTransferItem(idx); return; }
+      if (qty > transferItems[idx].store_qty) {
+        errorEl.textContent = `Store only has ${transferItems[idx].store_qty} unit(s) of "${transferItems[idx].product_name}".`;
+        errorEl.style.display = 'block';
+        return;
+      }
+      transferItems[idx].quantity = qty;
+    }
+
+    function removeTransferItem(idx) { transferItems.splice(idx, 1); renderTransferItems(); }
+
+    function clearTransfer() {
+      transferItems = [];
+      document.getElementById('transfer-notes').value = '';
+      document.getElementById('transfer-error').style.display = 'none';
+      renderTransferItems();
+    }
+
+    async function submitTransfer() {
+      const errorEl = document.getElementById('transfer-error');
+      errorEl.style.display = 'none';
+
+      if (!transferItems.length) { errorEl.textContent = 'Add at least one item before sending.'; errorEl.style.display = 'block'; return; }
+
+      const notes = document.getElementById('transfer-notes').value.trim();
+      const btn = document.getElementById('submit-transfer-btn');
+      btn.disabled = true; btn.textContent = 'Sending...';
+
+      const { error } = await supabaseClient.rpc('record_transfer', {
+        p_staff_id: currentStaff.id,
+        p_notes: notes || null,
+        p_items: transferItems.map(i => ({
+          store_product_id: i.store_product_id, product_name: i.product_name,
+          quantity: i.quantity, unit_cost: i.unit_cost, unit_price: i.unit_price
+        }))
+      });
+
+      btn.disabled = false; btn.textContent = '✅ Send to Shop';
+
+      if (error) { errorEl.textContent = 'Transfer failed: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      clearTransfer();
+      await Promise.all([loadStoreProducts(), loadHistory()]);
+      alert(`✅ Sent to shop! Remember to mark it as paid in the shop app (Dashboard → Incoming Transfers) once payment is received.`);
+    }
+
+    // ─── TRANSFER HISTORY ───────────────────────────────────────────────────
+    async function loadHistory() {
+      const { data, error } = await supabaseClient
+        .from('stock_transfers')
+        .select('*, staff(full_name), stock_transfer_items(product_name, quantity)')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (error) { document.getElementById('history-table').innerHTML = '<div class="empty-state">Failed to load history.</div>'; return; }
+
+      const ids = (data || []).map(t => t.id.toString());
+      let paymentMap = {};
+      if (ids.length) {
+        const { data: incoming } = await supabaseClient
+          .from('incoming_transfers').select('transfer_ref, payment_status, amount_paid').in('transfer_ref', ids);
+        (incoming || []).forEach(i => { paymentMap[i.transfer_ref] = i; });
+      }
+
+      const unpaidCount = (data || []).filter(t => (paymentMap[t.id]?.payment_status || 'unpaid') !== 'paid').length;
+      document.getElementById('sum-unpaid').textContent = unpaidCount;
+
+      const el = document.getElementById('history-table');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No transfers yet.</div>'; return; }
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Items</th><th>Value</th><th>Payment</th></tr></thead>
+          <tbody>
+            ${data.map(t => {
+              const dateStr = new Date(t.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+              const items = (t.stock_transfer_items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
+              const status = paymentMap[t.id]?.payment_status || 'unpaid';
+              const payClass = status === 'paid' ? 'pay-paid' : status === 'partial' ? 'pay-partial' : 'pay-unpaid';
+              return `
+                <tr>
+                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
+                  <td style="font-size:0.82rem;">${items || '—'}</td>
+                  <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
+                  <td><span class="pay-badge ${payClass}">${status}</span></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
+    function escapeAttr(str) { return (str ?? '').replace(/"/g, '&quot;'); }
+  </script>
+</body>
+</html>
