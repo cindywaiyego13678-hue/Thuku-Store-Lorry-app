@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports — Thuku Store &amp; Lorry</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📊 Reports</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Daily Report — Lorry Sales</h2>
+      <label>Select Report Date</label>
+      <input type="date" id="report-date">
+      <button onclick="loadDailyReport()">Generate Report</button>
+    </div>
+
+    <div class="grid grid-4">
+      <div class="stat-card"><div class="label">Sales Recorded</div><div class="value" id="total-sales">0</div></div>
+      <div class="stat-card"><div class="label">Revenue</div><div class="value good" id="total-revenue">Ksh 0</div></div>
+      <div class="stat-card"><div class="label">Items Sold</div><div class="value" id="items-sold">0</div></div>
+      <div class="stat-card"><div class="label">Gross Profit</div><div class="value good" id="total-profit">Ksh 0</div></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Profit by Product</h2>
+      <div id="profit-table"><div class="empty-state">Pick a date and generate the report.</div></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Sales List</h2>
+      <div id="sales-list"><div class="empty-state">No data yet.</div></div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    let currentStaffReports = null;
+
+    (async () => {
+      currentStaffReports = await requireAuth(['admin','store_staff']);
+      if (!currentStaffReports) return;
+      document.getElementById('staff-name').textContent = `${currentStaffReports.full_name} (${currentStaffReports.role})`;
+      renderNav();
+
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      document.getElementById('report-date').value = `${yyyy}-${mm}-${dd}`;
+
+      await loadDailyReport();
+    })();
+
+    function renderNav() {
+      const tabs = [
+        { href: 'store.html', label: 'Store' },
+        { href: 'lorry.html', label: 'Lorry' }
+      ];
+      if (currentStaffReports.role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+      tabs.push({ href: 'reports.html', label: 'Reports' });
+      document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+        `<a href="${t.href}" class="${t.href === 'reports.html' ? 'active' : ''}">${t.label}</a>`
+      ).join('');
+    }
+
+    function displayName(p) {
+      if (!p) return 'Unknown';
+      return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+    }
+
+    async function loadDailyReport() {
+      const dateInput = document.getElementById('report-date').value;
+      if (!dateInput) { alert('Please select a date.'); return; }
+
+      const dayStart = new Date(dateInput + 'T00:00:00').toISOString();
+      const dayEnd = new Date(dateInput + 'T23:59:59.999').toISOString();
+
+      // Pull lorry sales for the day, joined to store_products for cost/price/brand/size/density
+      const { data: sales, error } = await supabaseClient
+        .from('lorry_sales')
+        .select('*, store_products(name, manufacturer, size, density, cost, price, category)')
+        .gte('created_at', dayStart)
+        .lte('created_at', dayEnd)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error(error);
+        alert('Error loading report: ' + error.message);
+        return;
+      }
+
+      renderReport(sales || []);
+    }
+
+    function renderReport(sales) {
+      const transactions = sales.length;
+      const revenue = sales.reduce((sum, s) => sum + Number(s.unit_price) * Number(s.quantity), 0);
+      const itemsSold = sales.reduce((sum, s) => sum + Number(s.quantity), 0);
+      const grossProfit = sales.reduce((sum, s) => {
+        const cost = Number(s.store_products?.cost || 0);
+        return sum + (Number(s.unit_price) - cost) * Number(s.quantity);
+      }, 0);
+
+      document.getElementById('total-sales').textContent = transactions;
+      document.getElementById('total-revenue').textContent = `Ksh ${revenue.toLocaleString()}`;
+      document.getElementById('items-sold').textContent = itemsSold;
+      document.getElementById('total-profit').textContent = `Ksh ${Math.round(grossProfit).toLocaleString()}`;
+
+      // ---- Profit by Product (grouped) ----
+      const grouped = {};
+      sales.forEach(s => {
+        const p = s.store_products;
+        const key = s.store_product_id || s.product_name || 'unknown';
+        if (!grouped[key]) {
+          grouped[key] = {
+            brand: p?.manufacturer || '—',
+            product: p?.name || s.product_name || 'Unknown',
+            size: p?.size || '—',
+            density: p?.density || '—',
+            qty: 0,
+            cost: Number(p?.cost || 0),
+            price: Number(p?.price || 0),
+            profit: 0
+          };
+        }
+        const cost = Number(p?.cost || 0);
+        grouped[key].qty += Number(s.quantity);
+        grouped[key].profit += (Number(s.unit_price) - cost) * Number(s.quantity);
+      });
+      const rows = Object.values(grouped).sort((a, b) => b.qty - a.qty);
+
+      const profitEl = document.getElementById('profit-table');
+      if (!rows.length) {
+        profitEl.innerHTML = '<div class="empty-state">No lorry sales for this date.</div>';
+      } else {
+        profitEl.innerHTML = `
+          <table>
+            <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty Sold</th><th>Cost Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td>${escapeHtmlReports(r.brand)}</td>
+                  <td>${escapeHtmlReports(r.product)}</td>
+                  <td>${escapeHtmlReports(r.size)}</td>
+                  <td>${escapeHtmlReports(r.density)}</td>
+                  <td>${r.qty}</td>
+                  <td>Ksh ${r.cost.toLocaleString()}</td>
+                  <td>Ksh ${r.price.toLocaleString()}</td>
+                  <td style="color:${r.profit >= 0 ? '#065f46' : '#991b1b'}; font-weight:600;">Ksh ${Math.round(r.profit).toLocaleString()}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+
+      // ---- Raw sales list ----
+      const listEl = document.getElementById('sales-list');
+      if (!sales.length) {
+        listEl.innerHTML = '<div class="empty-state">No sales for this date.</div>';
+        return;
+      }
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Time</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th></tr></thead>
+          <tbody>
+            ${sales.map(s => {
+              const time = new Date(s.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+              return `
+                <tr>
+                  <td>${time}</td>
+                  <td>${escapeHtmlReports(displayName(s.store_products) || s.product_name)}</td>
+                  <td>${s.quantity}</td>
+                  <td>Ksh ${Number(s.unit_price).toLocaleString()}</td>
+                  <td>Ksh ${(Number(s.unit_price) * Number(s.quantity)).toLocaleString()}</td>
+                  <td>${escapeHtmlReports(s.customer_name || 'Walk-in')}</td>
+                  <td>${escapeHtmlReports(s.payment_method)}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function escapeHtmlReports(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
