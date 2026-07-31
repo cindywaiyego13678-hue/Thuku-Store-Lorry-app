@@ -74,7 +74,14 @@
             <select id="return-product"><option value="">— choose a product —</option></select>
           </div>
           <div class="field"><label>Quantity</label><input type="number" id="return-qty" min="0.01" step="any" placeholder="e.g. 2"></div>
-          <div class="field"><label>Reason (optional)</label><input type="text" id="return-reason" placeholder="e.g. Unsold end of day"></div>
+          <div class="field">
+            <label>Condition</label>
+            <select id="return-condition">
+              <option value="good">Good — back into sellable store stock</option>
+              <option value="damaged">Damaged — write off, do not restock</option>
+            </select>
+          </div>
+          <div class="field"><label>Reason (optional)</label><input type="text" id="return-reason" placeholder="e.g. Unsold end of day, or how it got damaged"></div>
           <button class="secondary" onclick="recordReturn()" style="width:100%;">Return to Store</button>
           <p class="error-text" id="return-error" style="display:none;"></p>
         </div>
@@ -243,6 +250,7 @@
       errorEl.style.display = 'none';
       const productId = document.getElementById('return-product').value;
       const qty = parseFloat(document.getElementById('return-qty').value);
+      const condition = document.getElementById('return-condition').value;
       const reason = document.getElementById('return-reason').value.trim();
 
       if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
@@ -250,15 +258,16 @@
       if (!navigator.onLine) { errorEl.textContent = 'Recording a return needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
 
       const { error } = await supabaseClient.rpc('record_lorry_return', {
-        p_store_product_id: productId, p_quantity: qty, p_reason: reason || null, p_staff_id: currentStaff.id
+        p_store_product_id: productId, p_quantity: qty, p_reason: reason || null, p_staff_id: currentStaff.id, p_condition: condition
       });
       if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
 
       document.getElementById('return-product').value = '';
       document.getElementById('return-qty').value = '';
+      document.getElementById('return-condition').value = 'good';
       document.getElementById('return-reason').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      alert('✅ Return recorded — stock is back in the store.');
+      alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — removed from lorry, not added back to store stock.');
     }
 
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
