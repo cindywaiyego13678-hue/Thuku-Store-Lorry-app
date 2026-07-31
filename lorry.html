@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lorry — Thuku Store &amp; Lorry</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🚚 Lorry</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span id="sync-badge"></span>
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="grid" style="grid-template-columns: 1fr 1fr; gap:18px;">
+
+      <!-- LEFT: Lorry stock + issue from store -->
+      <div>
+        <div class="card" id="issue-card" style="margin-bottom:18px;">
+          <h3 style="margin-top:0;">📦 Load Stock onto Lorry</h3>
+          <div class="field">
+            <label>Product</label>
+            <select id="issue-product"><option value="">— choose a product —</option></select>
+          </div>
+          <div class="field"><label>Quantity</label><input type="number" id="issue-qty" min="0.01" step="any" placeholder="e.g. 10"></div>
+          <div class="field"><label>Notes (optional)</label><input type="text" id="issue-notes" placeholder="e.g. Morning route — Kasarani"></div>
+          <button onclick="issueStock()" style="width:100%;">Load onto Lorry</button>
+          <p class="error-text" id="issue-error" style="display:none;"></p>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">Current Lorry Stock</h3>
+          <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Record sale / return -->
+      <div>
+        <div class="card" style="margin-bottom:18px;">
+          <h3 style="margin-top:0;">💰 Record a Sale</h3>
+          <div class="field">
+            <label>Product</label>
+            <select id="sale-product"><option value="">— choose a product —</option></select>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="sale-qty" min="0.01" step="any" placeholder="1"></div>
+            <div class="field" style="flex:1;"><label>Unit Price (Ksh)</label><input type="number" id="sale-price" placeholder="e.g. 1500"></div>
+          </div>
+          <div class="field"><label>Customer name (optional)</label><input type="text" id="sale-customer" placeholder="Walk-in"></div>
+          <div class="field"><label>Customer phone (optional)</label><input type="tel" id="sale-phone" placeholder="07XXXXXXXX"></div>
+          <div class="field">
+            <label>Payment method</label>
+            <select id="sale-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
+          </div>
+          <button onclick="recordSale()" style="width:100%;">Record Sale</button>
+          <p class="error-text" id="sale-error" style="display:none;"></p>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">↩️ Record a Return</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Unsold stock returned to the store at end of route.</p>
+          <div class="field">
+            <label>Product</label>
+            <select id="return-product"><option value="">— choose a product —</option></select>
+          </div>
+          <div class="field"><label>Quantity</label><input type="number" id="return-qty" min="0.01" step="any" placeholder="e.g. 2"></div>
+          <div class="field"><label>Reason (optional)</label><input type="text" id="return-reason" placeholder="e.g. Unsold end of day"></div>
+          <button class="secondary" onclick="recordReturn()" style="width:100%;">Return to Store</button>
+          <p class="error-text" id="return-error" style="display:none;"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/lorry-offline-sync.js"></script>
+  <script>
+    let currentStaff = null;
+    let lorryStock = [];
+    let storeProducts = [];
+
+    (async () => {
+      currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav();
+      // Loading stock onto the lorry needs live store stock — only admin/store_staff can do it
+      if (!['admin','store_staff'].includes(currentStaff.role)) {
+        document.getElementById('issue-card').style.display = 'none';
+      }
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+    })();
+
+    function renderNav() {
+      document.getElementById('nav-tabs').innerHTML = `
+        <a href="store.html">Store</a>
+        <a href="lorry.html" class="active">Lorry</a>
+      `;
+    }
+
+    function displayName(p) {
+      return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+    }
+
+    async function loadStoreProducts() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('store_products_for_lorry');
+        if (cached) { storeProducts = cached.data; populateProductSelects(); }
+        return;
+      }
+      const { data, error } = await supabaseClient.from('store_products').select('*').eq('is_active', true).order('name');
+      if (error) { console.error(error); return; }
+      storeProducts = data || [];
+      cacheSet('store_products_for_lorry', storeProducts);
+      populateProductSelects();
+    }
+
+    function populateProductSelects() {
+      const opts = storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
+      ['issue-product','sale-product','return-product'].forEach(id => {
+        document.getElementById(id).innerHTML = '<option value="">— choose a product —</option>' + opts;
+      });
+    }
+
+    document.getElementById('sale-product').addEventListener('change', (e) => {
+      const opt = e.target.options[e.target.selectedIndex];
+      const price = opt.dataset.price;
+      if (price) document.getElementById('sale-price').value = price;
+    });
+
+    async function loadLorryStock() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('lorry_stock');
+        if (cached) { lorryStock = cached.data; renderLorryStock(); }
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from('lorry_stock').select('*, store_products(name, size, manufacturer)').gt('quantity', 0);
+      if (error) { console.error(error); return; }
+      lorryStock = data || [];
+      cacheSet('lorry_stock', lorryStock);
+      renderLorryStock();
+    }
+
+    function renderLorryStock() {
+      const el = document.getElementById('lorry-stock-table');
+      if (!lorryStock.length) { el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>'; return; }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Product</th><th>Qty on Lorry</th></tr></thead>
+          <tbody>
+            ${lorryStock.map(r => `
+              <tr><td>${escapeHtml(displayName(r.store_products || {}))}</td><td><span class="badge in_stock">${r.quantity}</span></td></tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ─── ISSUE STOCK TO LORRY (needs live connection — touches store stock) ──
+    async function issueStock() {
+      const errorEl = document.getElementById('issue-error');
+      errorEl.style.display = 'none';
+      const productId = document.getElementById('issue-product').value;
+      const qty = parseFloat(document.getElementById('issue-qty').value);
+      const notes = document.getElementById('issue-notes').value.trim();
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Loading stock onto the lorry needs internet (it checks live store stock).'; errorEl.style.display = 'block'; return; }
+
+      const { error } = await supabaseClient.rpc('issue_to_lorry', {
+        p_store_product_id: productId, p_quantity: qty, p_staff_id: currentStaff.id, p_notes: notes || null
+      });
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      document.getElementById('issue-product').value = '';
+      document.getElementById('issue-qty').value = '';
+      document.getElementById('issue-notes').value = '';
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      alert('✅ Stock loaded onto the lorry.');
+    }
+
+    // ─── RECORD SALE (offline-capable) ───────────────────────────────────────
+    async function recordSale() {
+      const errorEl = document.getElementById('sale-error');
+      errorEl.style.display = 'none';
+      const select = document.getElementById('sale-product');
+      const productId = select.value;
+      const qty = parseFloat(document.getElementById('sale-qty').value);
+      const unitPrice = parseFloat(document.getElementById('sale-price').value);
+      const customerName = document.getElementById('sale-customer').value.trim();
+      const customerPhone = document.getElementById('sale-phone').value.trim();
+      const paymentMethod = document.getElementById('sale-payment').value;
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0 || isNaN(unitPrice)) { errorEl.textContent = 'Please enter a valid quantity and price.'; errorEl.style.display = 'block'; return; }
+
+      const productName = select.options[select.selectedIndex].dataset.name;
+      const saleData = {
+        store_product_id: productId, product_name: productName, quantity: qty, unit_price: unitPrice,
+        customer_name: customerName || null, customer_phone: customerPhone || null,
+        payment_method: paymentMethod, staff_id: currentStaff.id
+      };
+
+      if (navigator.onLine) {
+        const { error } = await supabaseClient.rpc('record_lorry_sale', {
+          p_store_product_id: productId, p_quantity: qty, p_unit_price: unitPrice,
+          p_customer_name: customerName || null, p_customer_phone: customerPhone || null,
+          p_payment_method: paymentMethod, p_staff_id: currentStaff.id, p_synced: true
+        });
+        if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+        await loadLorryStock();
+      } else {
+        await queueLorrySaleOffline(saleData);
+        // Optimistically reflect the sale in the cached lorry stock so the seller sees it update
+        const row = lorryStock.find(r => r.store_product_id === productId);
+        if (row) { row.quantity = Math.max(0, row.quantity - qty); renderLorryStock(); cacheSet('lorry_stock', lorryStock); }
+        updateLorrySyncBadge((await getPendingLorrySales()).length);
+      }
+
+      document.getElementById('sale-product').value = '';
+      document.getElementById('sale-qty').value = '';
+      document.getElementById('sale-price').value = '';
+      document.getElementById('sale-customer').value = '';
+      document.getElementById('sale-phone').value = '';
+      alert(navigator.onLine ? '✅ Sale recorded.' : '✅ Sale saved offline — will sync when back online.');
+    }
+
+    // ─── RECORD RETURN (needs live connection — touches store stock) ────────
+    async function recordReturn() {
+      const errorEl = document.getElementById('return-error');
+      errorEl.style.display = 'none';
+      const productId = document.getElementById('return-product').value;
+      const qty = parseFloat(document.getElementById('return-qty').value);
+      const reason = document.getElementById('return-reason').value.trim();
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Recording a return needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
+
+      const { error } = await supabaseClient.rpc('record_lorry_return', {
+        p_store_product_id: productId, p_quantity: qty, p_reason: reason || null, p_staff_id: currentStaff.id
+      });
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      document.getElementById('return-product').value = '';
+      document.getElementById('return-qty').value = '';
+      document.getElementById('return-reason').value = '';
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      alert('✅ Return recorded — stock is back in the store.');
+    }
+
+    function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
+    function escapeAttr(str) { return (str ?? '').replace(/"/g, '&quot;'); }
+  </script>
+</body>
+</html>
