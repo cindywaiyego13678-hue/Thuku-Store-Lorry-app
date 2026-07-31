@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Owner Dashboard — Thuku Enterprise</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f2137">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📊 Owner Dashboard</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="role-tag" id="staff-name">...</span>
+      <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="nav-tabs" id="nav-tabs"></div>
+
+    <div class="grid grid-4" style="margin-bottom:20px;">
+      <div class="stat-card">
+        <div class="label">Today's Revenue</div>
+        <div class="value good" id="stat-today-revenue">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Today's Sales</div>
+        <div class="value" id="stat-today-count">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">This Week</div>
+        <div class="value" id="stat-week-revenue">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Low Stock Items</div>
+        <div class="value alert" id="stat-low-stock">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Today's Gross Profit</div>
+        <div class="value good" id="stat-today-profit">—</div>
+      </div>
+    </div>
+
+    <div class="grid" style="grid-template-columns: 1.2fr 1fr;">
+      <div class="card">
+        <h3 style="margin-top:0;">Recent Sales</h3>
+        <div id="recent-sales" style="max-height:400px; overflow-y:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">⚠️ Low Stock</h3>
+        <div id="low-stock-list"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">🚚 Incoming Transfers from Store</h3>
+      <div id="incoming-transfers-list"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">🏆 Top Sellers (Last 30 Days)</h3>
+      <div id="top-sellers"></div>
+    </div>
+  </div>
+
+  <script src="js/offline-cache.js"></script>
+  <script src="js/supabase-config.js"></script>
+  <script>
+    let currentStaff = null;
+
+    (async () => {
+      currentStaff = await requireAuth(['admin','owner']);
+      if (!currentStaff) return;
+      document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
+      renderNav(currentStaff.role);
+      await Promise.all([
+        loadStats(),
+        loadRecentSales(),
+        loadLowStock(),
+        loadTopSellers(),
+        loadIncomingTransfers()
+      ]);
+      setInterval(() => {
+        loadStats();
+        loadRecentSales();
+      }, 60000);
+    })();
+
+    function renderNav(role) {
+      const tabs = [{ href: 'pos.html', label: 'POS' }];
+      if (role === 'admin') tabs.push({ href: 'inventory.html', label: 'Inventory' });
+      tabs.push({ href: 'dashboard.html', label: 'Dashboard' });
+      if (role === 'admin') tabs.push({ href: 'staff.html', label: 'Staff' });
+      tabs.push({ href: 'reports.html', label: 'Reports' });
+      document.getElementById('nav-tabs').innerHTML = tabs.map(t =>
+        `<a href="${t.href}" class="${t.href === 'dashboard.html' ? 'active' : ''}">${t.label}</a>`
+      ).join('');
+    }
+
+    function startOfDayISO() {
+      const d = new Date(); d.setHours(0,0,0,0); return d.toISOString();
+    }
+    function startOfWeekISO() {
+      const d = new Date();
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      d.setDate(diff); d.setHours(0,0,0,0);
+      return d.toISOString();
+    }
+
+    async function loadStats() {
+      const todayStart = startOfDayISO();
+      const weekStart = startOfWeekISO();
+
+      const { data: todaySales } = await supabaseClient
+        .from('sales').select('total_amount').eq('status','completed').gte('created_at', todayStart);
+      const { data: weekSales } = await supabaseClient
+        .from('sales').select('total_amount').eq('status','completed').gte('created_at', weekStart);
+      const { data: lowStock } = await supabaseClient
+        .from('products').select('id, stock_quantity, reorder_level').eq('is_active', true);
+      const { data: todayItems } = await supabaseClient
+        .from('sale_items')
+        .select('quantity, unit_price, products(cost), sales!inner(created_at, status)')
+        .gte('sales.created_at', todayStart)
+        .eq('sales.status', 'completed');
+
+      const todayRevenue = (todaySales || []).reduce((s, r) => s + Number(r.total_amount), 0);
+      const weekRevenue = (weekSales || []).reduce((s, r) => s + Number(r.total_amount), 0);
+      const lowStockCount = (lowStock || []).filter(p => p.stock_quantity <= (p.reorder_level ?? 2)).length;
+      const todayProfit = (todayItems || []).reduce((s, i) => {
+        const cost = Number(i.products?.cost || 0);
+        return s + (Number(i.unit_price) - cost) * (i.quantity || 1);
+      }, 0);
+
+      document.getElementById('stat-today-revenue').textContent = `Ksh ${todayRevenue.toLocaleString()}`;
+      document.getElementById('stat-today-count').textContent = (todaySales || []).length;
+      document.getElementById('stat-week-revenue').textContent = `Ksh ${weekRevenue.toLocaleString()}`;
+      document.getElementById('stat-low-stock').textContent = lowStockCount;
+      document.getElementById('stat-today-profit').textContent = `Ksh ${Math.round(todayProfit).toLocaleString()}`;
+    }
+
+    async function loadRecentSales() {
+      const { data, error } = await supabaseClient
+        .from('sales')
+        .select('*, staff(full_name), sale_items(*, products(name))')
+        .order('created_at', { ascending: false })
+        .limit(15);
+      const el = document.getElementById('recent-sales');
+      if (error || !data || !data.length) {
+        el.innerHTML = '<div class="empty-state">No sales yet.</div>';
+        return;
+      }
+      el.innerHTML = data.map(s => {
+        const items = (s.sale_items || []).map(i => `${i.products?.name}${i.quantity > 1 ? ' x' + i.quantity : ''}`).filter(Boolean).join(', ');
+        const time = new Date(s.created_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' });
+        return `
+          <div style="padding:8px 0; border-bottom:1px solid var(--border);">
+            <div style="display:flex; justify-content:space-between;">
+              <strong>Ksh ${Number(s.total_amount).toLocaleString()}</strong>
+              <span class="badge in_stock">${s.payment_method}</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--muted);">${escapeHtml(items)}</div>
+            <div style="font-size:0.75rem; color:var(--muted);">${time} · ${s.staff?.full_name || 'staff'}</div>
+          </div>`;
+      }).join('');
+    }
+
+    async function loadLowStock() {
+      const { data, error } = await supabaseClient
+        .from('products').select('id, name, stock_quantity, reorder_level').eq('is_active', true);
+      const el = document.getElementById('low-stock-list');
+      const low = (data || []).filter(p => p.stock_quantity <= (p.reorder_level ?? 2));
+      if (error || !low.length) {
+        el.innerHTML = '<div class="empty-state">All stock levels healthy.</div>';
+        return;
+      }
+      el.innerHTML = low.map(p => `
+        <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); font-size:0.88rem;">
+          <span>${escapeHtml(p.name)}</span>
+          <span class="badge low">${p.stock_quantity} left</span>
+        </div>`).join('');
+    }
+
+    async function loadTopSellers() {
+      const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString();
+      const { data, error } = await supabaseClient
+        .from('sale_items')
+        .select('product_id, unit_price, quantity, products(name), sales!inner(created_at, status)')
+        .gte('sales.created_at', thirtyDaysAgo)
+        .eq('sales.status', 'completed');
+
+      const el = document.getElementById('top-sellers');
+      if (error || !data || !data.length) {
+        el.innerHTML = '<div class="empty-state">No sales in the last 30 days.</div>';
+        return;
+      }
+
+      const tally = {};
+      data.forEach(item => {
+        const name = item.products?.name || 'Unknown';
+        if (!tally[name]) tally[name] = { count: 0, revenue: 0 };
+        tally[name].count += item.quantity || 1;
+        tally[name].revenue += Number(item.unit_price) * (item.quantity || 1);
+      });
+      const sorted = Object.entries(tally).sort((a,b) => b[1].count - a[1].count).slice(0, 8);
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+          <tbody>
+            ${sorted.map(([name, s]) => `
+              <tr><td>${escapeHtml(name)}</td><td>${s.count}</td><td>Ksh ${s.revenue.toLocaleString()}</td></tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function loadIncomingTransfers() {
+      const { data, error } = await supabaseClient
+        .from('incoming_transfers')
+        .select('*')
+        .order('received_at', { ascending: false })
+        .limit(20);
+      const el = document.getElementById('incoming-transfers-list');
+      if (error || !data || !data.length) {
+        el.innerHTML = '<div class="empty-state">No transfers from the store yet.</div>';
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Sent By</th><th>Items</th><th>Value</th><th>Payment</th><th></th></tr></thead>
+          <tbody>
+            ${data.map(t => {
+              const dateStr = new Date(t.received_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+              const items = (t.items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
+              const badgeClass = t.payment_status === 'paid' ? 'in_stock' : t.payment_status === 'partial' ? 'low' : 'low';
+              return `
+                <tr>
+                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
+                  <td style="font-size:0.85rem;">${escapeHtml(t.sent_by || '—')}</td>
+                  <td style="font-size:0.82rem;">${items || '—'}</td>
+                  <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
+                  <td><span class="badge ${badgeClass}">${t.payment_status}</span></td>
+                  <td style="white-space:nowrap;">
+                    ${t.payment_status !== 'paid'
+                      ? `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='markTransferPaid(${JSON.stringify(t.id)})'>Mark Paid</button>`
+                      : t.received_into_inventory
+                        ? `<span class="badge in_stock">Received</span>`
+                        : `<button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='receiveTransfer(${JSON.stringify(t.id)})'>Receive into Inventory</button>`}
+                  </td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function markTransferPaid(id) {
+      if (!confirm('Mark this transfer as fully paid?')) return;
+      const { error } = await supabaseClient
+        .from('incoming_transfers')
+        .update({ payment_status: 'paid' })
+        .eq('id', id);
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadIncomingTransfers();
+    }
+
+    async function receiveTransfer(id) {
+      if (!confirm('Add these items into shop inventory now? Existing products are matched by name (case-insensitive); anything unmatched will be created as a new product. This can only be done once per transfer.')) return;
+      const { error } = await supabaseClient.rpc('receive_incoming_transfer', { p_transfer_id: id });
+      if (error) { alert('Error: ' + error.message); return; }
+      await loadIncomingTransfers();
+      alert('Inventory updated. Check the Inventory page to review names/prices for any newly created products.');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
