@@ -46,6 +46,7 @@
       <div class="summary-box"><div class="label">Store Stock Value (cost)</div><div class="value" id="sum-value">—</div></div>
       <div class="summary-box"><div class="label">Unpaid Transfers</div><div class="value" id="sum-unpaid" style="color:#dc2626;">—</div></div>
       <div class="summary-box" id="profit-box" style="display:none;"><div class="label">Lorry Profit (Today)</div><div class="value" id="sum-profit" style="color:#059669;">—</div></div>
+      <div class="summary-box" id="loss-box" style="display:none;"><div class="label">Damaged Stock Loss (Today)</div><div class="value" id="sum-loss" style="color:#dc2626;">—</div></div>
     </div>
 
     <div class="store-layout">
@@ -132,7 +133,7 @@
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
       await Promise.all([loadStoreProducts(), loadHistory()]);
-      if (currentStaff.role === 'admin') await loadLorryProfit();
+      if (currentStaff.role === 'admin') await Promise.all([loadLorryProfit(), loadDamagedLoss()]);
     })();
 
     async function loadLorryProfit() {
@@ -147,6 +148,20 @@
       const box = document.getElementById('profit-box');
       box.style.display = '';
       document.getElementById('sum-profit').textContent = `Ksh ${Math.round(data[0].profit).toLocaleString()}`;
+    }
+
+    async function loadDamagedLoss() {
+      if (!navigator.onLine) return;
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      const { data, error } = await supabaseClient.rpc('get_damaged_loss_summary', {
+        p_start: start.toISOString(), p_end: end.toISOString()
+      });
+      if (error || !data || !data.length) return;
+      const box = document.getElementById('loss-box');
+      box.style.display = '';
+      document.getElementById('sum-loss').textContent = `Ksh ${Math.round(data[0].loss_value).toLocaleString()}`;
     }
 
     function renderNav() {
