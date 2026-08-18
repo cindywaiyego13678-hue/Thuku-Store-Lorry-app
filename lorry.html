@@ -57,8 +57,6 @@
             <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="delivery-qty" min="0.01" step="any" placeholder="1"></div>
             <div class="field" style="flex:1;"><label>Unit Price (Ksh)</label><input type="number" id="delivery-price" placeholder="e.g. 1500"></div>
           </div>
-          <div class="field"><label>Customer name (optional)</label><input type="text" id="delivery-customer" placeholder="e.g. Jane, Kasarani"></div>
-          <div class="field"><label>Customer phone (optional)</label><input type="tel" id="delivery-phone" placeholder="07XXXXXXXX"></div>
           <div class="field">
             <label>Payment method <span style="color:var(--muted); font-weight:normal;">(if delivered)</span></label>
             <select id="delivery-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
@@ -220,8 +218,6 @@
       const productId = select.value;
       const qty = parseFloat(document.getElementById('delivery-qty').value);
       const unitPrice = parseFloat(document.getElementById('delivery-price').value);
-      const customerName = document.getElementById('delivery-customer').value.trim();
-      const customerPhone = document.getElementById('delivery-phone').value.trim();
       const paymentMethod = document.getElementById('delivery-payment').value;
 
       if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
@@ -230,14 +226,14 @@
       const productName = select.options[select.selectedIndex].dataset.name;
       const saleData = {
         store_product_id: productId, product_name: productName, quantity: qty, unit_price: unitPrice,
-        customer_name: customerName || null, customer_phone: customerPhone || null,
+        customer_name: null, customer_phone: null,
         payment_method: paymentMethod, staff_id: currentStaff.id
       };
 
       if (navigator.onLine) {
         const { error } = await supabaseClient.rpc('record_lorry_sale', {
           p_store_product_id: productId, p_quantity: qty, p_unit_price: unitPrice,
-          p_customer_name: customerName || null, p_customer_phone: customerPhone || null,
+          p_customer_name: null, p_customer_phone: null,
           p_payment_method: paymentMethod, p_staff_id: currentStaff.id, p_synced: true
         });
         if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
@@ -262,15 +258,12 @@
       const qty = parseFloat(document.getElementById('delivery-qty').value);
       const condition = document.getElementById('delivery-condition').value;
       const reason = document.getElementById('delivery-reason').value.trim();
-      const customerName = document.getElementById('delivery-customer').value.trim();
 
       if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
       if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
       if (!navigator.onLine) { errorEl.textContent = 'Recording a rejected delivery needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
 
-      const fullReason = customerName
-        ? `Rejected by ${customerName}${reason ? ' — ' + reason : ''}`
-        : (reason || 'Customer rejected delivery');
+      const fullReason = reason || 'Customer rejected delivery';
 
       const { error } = await supabaseClient.rpc('record_lorry_return', {
         p_store_product_id: productId, p_quantity: qty, p_reason: fullReason, p_staff_id: currentStaff.id, p_condition: condition
@@ -286,8 +279,6 @@
       document.getElementById('delivery-product').value = '';
       document.getElementById('delivery-qty').value = '';
       document.getElementById('delivery-price').value = '';
-      document.getElementById('delivery-customer').value = '';
-      document.getElementById('delivery-phone').value = '';
       document.getElementById('delivery-payment').value = 'cash';
       document.getElementById('delivery-condition').value = 'good';
       document.getElementById('delivery-reason').value = '';
