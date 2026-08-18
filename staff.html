@@ -26,59 +26,48 @@
         <h3 style="margin:0;">Add New Staff Member</h3>
         <button onclick="toggleAddForm()" id="toggle-add-btn">+ New Staff</button>
       </div>
-      <div id="add-staff-form" style="display:none; margin-top:14px;">
-        <div class="grid grid-2">
-          <div class="field"><label>Full name</label><input id="ns-name" placeholder="e.g. James Mwangi"></div>
-          <div class="field"><label>Email</label><input id="ns-email" type="email" placeholder="james@thuku.com"></div>
-          <div class="field">
-            <label>Temporary password</label>
-            <div style="display:flex; gap:6px;">
-              <input id="ns-password" type="text" placeholder="At least 6 characters" style="flex:1;">
-              <button type="button" class="secondary" style="white-space:nowrap;" onclick="generatePassword('ns-password')">Generate</button>
-            </div>
-          </div>
-          <div class="field">
-            <label>Role</label>
-            <select id="ns-role">
-              <option value="store_staff">Store Staff — inventory & transfers</option>
-              <option value="lorry_seller">Lorry Seller — lorry sales/returns only</option>
-              <option value="admin">Admin — full access (both apps)</option>
-            </select>
-          </div>
+
+      <div id="add-staff-form" style="display:none; margin-top:16px;">
+        <div class="field">
+          <label>Full name</label>
+          <input type="text" id="ns-name" placeholder="e.g. Peter Kamau">
         </div>
-        <p style="font-size:0.8rem; color:var(--muted); margin-top:-4px;">
-          You'll see this password once right after creating the account — write it down or share it immediately.
-        </p>
-        <button onclick="addStaff()" id="add-staff-btn">Create Staff Account</button>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="ns-email" placeholder="staff@thuku.com">
+        </div>
+        <div class="field">
+          <label>Temporary password</label>
+          <input type="password" id="ns-password" placeholder="At least 6 characters">
+        </div>
+        <div class="field">
+          <label>Role</label>
+          <select id="ns-role">
+            <option value="lorry_seller">Lorry Seller — records lorry sales &amp; returns only</option>
+            <option value="store_staff">Store Staff — store inventory, transfers, load lorry</option>
+            <option value="admin">Admin — full access to everything</option>
+          </select>
+        </div>
+        <p style="font-size:0.8rem; color:var(--muted); margin-top:-4px;">Share this password with them directly — they can change it after logging in.</p>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button style="flex:1;" id="save-staff-btn" onclick="addStaff()">Add Staff</button>
+          <button class="secondary" style="flex:1;" onclick="toggleAddForm()">Cancel</button>
+        </div>
         <p class="error-text" id="add-staff-error" style="display:none;"></p>
       </div>
     </div>
 
     <div class="card">
       <h3 style="margin-top:0;">Current Staff</h3>
-      <p style="font-size:0.8rem; color:var(--muted); margin-top:-8px;">
-        Shared with the shop app — admins can log into both, store/lorry staff only into this app.
-      </p>
       <div id="staff-list"></div>
     </div>
   </div>
-
-  <!-- Password reveal modal -->
-  <div id="password-modal" class="card" style="display:none; position:fixed; top:20%; left:50%; transform:translateX(-50%); width:92%; max-width:400px; z-index:60; text-align:center;">
-    <h3 id="pw-modal-title" style="margin-top:0;">Account Created</h3>
-    <p style="color:var(--muted); font-size:0.85rem;">Write this down or share it now — it won't be shown again.</p>
-    <div style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:'Courier New',monospace; font-size:1.1rem; font-weight:700; letter-spacing:1px; margin:12px 0;" id="pw-modal-value"></div>
-    <button style="width:100%;" onclick="copyPassword()">📋 Copy Password</button>
-    <button class="secondary" style="width:100%; margin-top:8px;" onclick="closePasswordModal()">Done</button>
-  </div>
-  <div id="password-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:50;"></div>
 
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
   <script>
     let currentStaff = null;
     let allStaff = [];
-    const STAFF_FUNCTION_URL = 'https://ipbqeyeanlyvklrjcbxl.supabase.co/functions/v1/hyper-handler';
 
     (async () => {
       currentStaff = await requireAuth(['admin']);
@@ -93,47 +82,71 @@
         <a href="store.html">Store</a>
         <a href="lorry.html">Lorry</a>
         <a href="staff.html" class="active">Staff</a>
-        <a href="reports.html">Reports</a>
       `;
     }
 
     function toggleAddForm() {
-      const f = document.getElementById('add-staff-form');
-      f.style.display = f.style.display === 'none' ? 'block' : 'none';
-    }
-
-    function generatePassword(fieldId) {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-      let pw = '';
-      for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-      document.getElementById(fieldId).value = pw;
+      const form = document.getElementById('add-staff-form');
+      const isOpen = form.style.display === 'block';
+      form.style.display = isOpen ? 'none' : 'block';
+      document.getElementById('toggle-add-btn').textContent = isOpen ? '+ New Staff' : 'Cancel';
+      if (isOpen) {
+        document.getElementById('ns-name').value = '';
+        document.getElementById('ns-email').value = '';
+        document.getElementById('ns-password').value = '';
+        document.getElementById('ns-role').value = 'lorry_seller';
+        document.getElementById('add-staff-error').style.display = 'none';
+      }
     }
 
     async function loadStaff() {
-      const { data, error } = await supabaseClient.from('staff').select('*').order('full_name');
-      if (error) { console.error(error); return; }
-      allStaff = data;
-      renderStaffList(allStaff);
+      const { data, error } = await supabaseClient
+        .from('staff')
+        .select('*')
+        .in('role', ['admin', 'store_staff', 'lorry_seller'])
+        .order('full_name');
+
+      if (error) {
+        document.getElementById('staff-list').innerHTML = `<p class="error-text">${error.message}</p>`;
+        return;
+      }
+
+      allStaff = data || [];
+      renderStaffList();
     }
 
-    function renderStaffList(staffRows) {
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    }
+
+    const ROLE_LABELS = {
+      admin: 'Admin',
+      store_staff: 'Store Staff',
+      lorry_seller: 'Lorry Seller'
+    };
+
+    function renderStaffList() {
       const el = document.getElementById('staff-list');
-      if (!staffRows.length) { el.innerHTML = '<div class="empty-state">No staff yet.</div>'; return; }
+      if (!allStaff.length) {
+        el.innerHTML = '<div class="empty-state">No staff yet.</div>';
+        return;
+      }
       el.innerHTML = `
         <table>
           <thead><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            ${staffRows.map(s => `
+            ${allStaff.map(s => `
               <tr>
                 <td>${escapeHtml(s.full_name)}</td>
-                <td><span class="badge in_stock">${s.role}</span></td>
+                <td><span class="badge in_stock">${ROLE_LABELS[s.role] || s.role}</span></td>
                 <td>${s.is_active ? '<span class="badge in_stock">active</span>' : '<span class="badge low">inactive</span>'}</td>
-                <td style="display:flex; gap:6px; flex-wrap:wrap;">
-                  <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick='resetPassword(${JSON.stringify(s.id)}, ${JSON.stringify(s.full_name)})'>Reset Password</button>
+                <td style="display:flex; gap:6px;">
                   ${s.id !== currentStaff.id ? `
                     <button class="secondary" style="padding:6px 10px; font-size:0.8rem;" onclick='toggleActive(${JSON.stringify(s.id)}, ${s.is_active})'>${s.is_active ? 'Deactivate' : 'Reactivate'}</button>
                     <button class="danger" style="padding:6px 10px; font-size:0.8rem;" onclick='deleteStaff(${JSON.stringify(s.id)}, ${JSON.stringify(s.full_name)})'>Delete</button>
-                  ` : '<span style="color:var(--muted); font-size:0.8rem; align-self:center;">You</span>'}
+                  ` : '<span style="color:var(--muted); font-size:0.8rem;">You</span>'}
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -160,102 +173,66 @@
         return;
       }
 
-      const btn = document.getElementById('add-staff-btn');
+      const btn = document.getElementById('save-staff-btn');
       btn.disabled = true;
-      btn.textContent = 'Creating...';
+      btn.textContent = 'Adding...';
 
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch(STAFF_FUNCTION_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ action: 'create', full_name, email, password, role })
-        });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || 'Failed to create staff member');
-
-        document.getElementById('ns-name').value = '';
-        document.getElementById('ns-email').value = '';
-        document.getElementById('ns-password').value = '';
-        toggleAddForm();
-        await loadStaff();
-        showPasswordModal(`Account Created — ${full_name}`, password);
-      } catch (err) {
-        errorEl.textContent = err.message;
-        errorEl.style.display = 'block';
-      }
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('https://ipbqeyeanlyvklrjcbxl.supabase.co/functions/v1/create-store-staff', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ action: 'create', full_name, email, password, role })
+      });
+      const result = await res.json();
 
       btn.disabled = false;
-      btn.textContent = 'Create Staff Account';
-    }
+      btn.textContent = 'Add Staff';
 
-    async function resetPassword(staffId, fullName) {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-      let newPassword = '';
-      for (let i = 0; i < 10; i++) newPassword += chars[Math.floor(Math.random() * chars.length)];
-
-      const customPw = prompt(`New password for ${fullName} (leave blank to auto-generate one):`, '');
-      if (customPw === null) return; // cancelled
-      if (customPw.trim()) newPassword = customPw.trim();
-      if (newPassword.length < 6) { alert('Password must be at least 6 characters.'); return; }
-
-      if (!confirm(`Reset ${fullName}'s password? Their old password will stop working immediately.`)) return;
-
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch(STAFF_FUNCTION_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ action: 'reset_password', staff_id: staffId, new_password: newPassword })
-        });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || 'Failed to reset password');
-        showPasswordModal(`New Password — ${fullName}`, newPassword);
-      } catch (err) {
-        alert('Error: ' + err.message);
+      if (!res.ok || result.error) {
+        errorEl.textContent = result.error || 'Failed to add staff member.';
+        errorEl.style.display = 'block';
+        return;
       }
-    }
 
-    let currentModalPassword = '';
-    function showPasswordModal(title, password) {
-      currentModalPassword = password;
-      document.getElementById('pw-modal-title').textContent = title;
-      document.getElementById('pw-modal-value').textContent = password;
-      document.getElementById('password-modal').style.display = 'block';
-      document.getElementById('password-modal-overlay').style.display = 'block';
-    }
-    function closePasswordModal() {
-      document.getElementById('password-modal').style.display = 'none';
-      document.getElementById('password-modal-overlay').style.display = 'none';
-    }
-    function copyPassword() {
-      navigator.clipboard.writeText(currentModalPassword).then(() => alert('Password copied.'));
+      toggleAddForm();
+      await loadStaff();
     }
 
     async function toggleActive(staffId, currentlyActive) {
-      const { error } = await supabaseClient.from('staff').update({ is_active: !currentlyActive }).eq('id', staffId);
-      if (error) { alert('Error: ' + error.message); return; }
+      const { error } = await supabaseClient
+        .from('staff')
+        .update({ is_active: !currentlyActive })
+        .eq('id', staffId);
+      if (error) {
+        alert(error.message);
+        return;
+      }
       await loadStaff();
     }
 
     async function deleteStaff(staffId, fullName) {
-      if (!confirm(`Permanently delete ${fullName}'s account? This cannot be undone.`)) return;
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch(STAFF_FUNCTION_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ action: 'delete', staff_id: staffId })
-        });
-        const result = await res.json();
-        if (!res.ok) throw new Error(result.error || 'Failed to delete staff member');
-        await loadStaff();
-      } catch (err) {
-        alert('Error: ' + err.message);
-      }
-    }
+      if (!confirm(`Permanently delete ${fullName}'s account? This cannot be undone. Their past records will be kept, but they will no longer be able to log in.`)) return;
 
-    function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('https://ipbqeyeanlyvklrjcbxl.supabase.co/functions/v1/create-store-staff', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ action: 'delete', staff_id: staffId })
+      });
+      const result = await res.json();
+
+      if (!res.ok || result.error) {
+        alert(result.error || 'Failed to delete staff member.');
+        return;
+      }
+      await loadStaff();
+    }
   </script>
 </body>
 </html>
