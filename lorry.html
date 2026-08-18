@@ -110,9 +110,11 @@
     })();
 
     function renderNav() {
+      const staffLink = currentStaff.role === 'admin' ? '<a href="staff.html">Staff</a>' : '';
       document.getElementById('nav-tabs').innerHTML = `
         <a href="store.html">Store</a>
         <a href="lorry.html" class="active">Lorry</a>
+        ${staffLink}
       `;
     }
 
