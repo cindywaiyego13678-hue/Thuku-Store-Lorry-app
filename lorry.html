@@ -61,18 +61,7 @@
             <label>Payment method <span style="color:var(--muted); font-weight:normal;">(if delivered)</span></label>
             <select id="delivery-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
           </div>
-          <div class="field">
-            <label>Condition <span style="color:var(--muted); font-weight:normal;">(if rejected)</span></label>
-            <select id="delivery-condition">
-              <option value="good">Good — back into sellable store stock</option>
-              <option value="damaged">Damaged — write off, do not restock</option>
-            </select>
-          </div>
-          <div class="field"><label>Reason / notes (optional)</label><input type="text" id="delivery-reason" placeholder="e.g. Customer not available, wrong size"></div>
-          <div style="display:flex; gap:10px;">
-            <button onclick="markDelivered()" style="flex:1;">✅ Delivered</button>
-            <button class="secondary" onclick="markRejected()" style="flex:1;">❌ Rejected — Return to Store</button>
-          </div>
+          <button onclick="markDelivered()" style="width:100%;">✅ Delivered</button>
           <p class="error-text" id="delivery-error" style="display:none;"></p>
         </div>
 
@@ -250,38 +239,11 @@
       alert(navigator.onLine ? '✅ Delivered — sale recorded.' : '✅ Delivered — saved offline, will sync when back online.');
     }
 
-    // ─── DELIVERY OUTCOME: REJECTED (needs live connection — touches store stock) ──
-    async function markRejected() {
-      const errorEl = document.getElementById('delivery-error');
-      errorEl.style.display = 'none';
-      const productId = document.getElementById('delivery-product').value;
-      const qty = parseFloat(document.getElementById('delivery-qty').value);
-      const condition = document.getElementById('delivery-condition').value;
-      const reason = document.getElementById('delivery-reason').value.trim();
-
-      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
-      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
-      if (!navigator.onLine) { errorEl.textContent = 'Recording a rejected delivery needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
-
-      const fullReason = reason || 'Customer rejected delivery';
-
-      const { error } = await supabaseClient.rpc('record_lorry_return', {
-        p_store_product_id: productId, p_quantity: qty, p_reason: fullReason, p_staff_id: currentStaff.id, p_condition: condition
-      });
-      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
-
-      clearDeliveryForm();
-      await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      alert(condition === 'good' ? '✅ Rejected — stock returned to store.' : '✅ Rejected — damaged stock written off.');
-    }
-
     function clearDeliveryForm() {
       document.getElementById('delivery-product').value = '';
       document.getElementById('delivery-qty').value = '';
       document.getElementById('delivery-price').value = '';
       document.getElementById('delivery-payment').value = 'cash';
-      document.getElementById('delivery-condition').value = 'good';
-      document.getElementById('delivery-reason').value = '';
     }
 
     // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
