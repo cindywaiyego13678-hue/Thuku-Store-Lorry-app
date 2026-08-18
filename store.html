@@ -299,9 +299,11 @@
     }
 
     function renderNav() {
+      const staffLink = currentStaff.role === 'admin' ? '<a href="staff.html">Staff</a>' : '';
       document.getElementById('nav-tabs').innerHTML = `
         <a href="store.html" class="active">Store</a>
         <a href="lorry.html">Lorry</a>
+        ${staffLink}
       `;
     }
 
