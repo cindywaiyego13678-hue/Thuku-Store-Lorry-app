@@ -44,31 +44,43 @@
         </div>
       </div>
 
-      <!-- RIGHT: Record sale / return -->
+      <!-- RIGHT: Delivery outcome / end-of-route return -->
       <div>
         <div class="card" style="margin-bottom:18px;">
-          <h3 style="margin-top:0;">💰 Record a Sale</h3>
+          <h3 style="margin-top:0;">🚚 Record Delivery Outcome</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Reached the customer? Record whether they took the order or not.</p>
           <div class="field">
             <label>Product</label>
-            <select id="sale-product"><option value="">— choose a product —</option></select>
+            <select id="delivery-product"><option value="">— choose a product —</option></select>
           </div>
           <div style="display:flex; gap:10px;">
-            <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="sale-qty" min="0.01" step="any" placeholder="1"></div>
-            <div class="field" style="flex:1;"><label>Unit Price (Ksh)</label><input type="number" id="sale-price" placeholder="e.g. 1500"></div>
+            <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="delivery-qty" min="0.01" step="any" placeholder="1"></div>
+            <div class="field" style="flex:1;"><label>Unit Price (Ksh)</label><input type="number" id="delivery-price" placeholder="e.g. 1500"></div>
           </div>
-          <div class="field"><label>Customer name (optional)</label><input type="text" id="sale-customer" placeholder="Walk-in"></div>
-          <div class="field"><label>Customer phone (optional)</label><input type="tel" id="sale-phone" placeholder="07XXXXXXXX"></div>
+          <div class="field"><label>Customer name (optional)</label><input type="text" id="delivery-customer" placeholder="e.g. Jane, Kasarani"></div>
+          <div class="field"><label>Customer phone (optional)</label><input type="tel" id="delivery-phone" placeholder="07XXXXXXXX"></div>
           <div class="field">
-            <label>Payment method</label>
-            <select id="sale-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
+            <label>Payment method <span style="color:var(--muted); font-weight:normal;">(if delivered)</span></label>
+            <select id="delivery-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
           </div>
-          <button onclick="recordSale()" style="width:100%;">Record Sale</button>
-          <p class="error-text" id="sale-error" style="display:none;"></p>
+          <div class="field">
+            <label>Condition <span style="color:var(--muted); font-weight:normal;">(if rejected)</span></label>
+            <select id="delivery-condition">
+              <option value="good">Good — back into sellable store stock</option>
+              <option value="damaged">Damaged — write off, do not restock</option>
+            </select>
+          </div>
+          <div class="field"><label>Reason / notes (optional)</label><input type="text" id="delivery-reason" placeholder="e.g. Customer not available, wrong size"></div>
+          <div style="display:flex; gap:10px;">
+            <button onclick="markDelivered()" style="flex:1;">✅ Delivered</button>
+            <button class="secondary" onclick="markRejected()" style="flex:1;">❌ Rejected — Return to Store</button>
+          </div>
+          <p class="error-text" id="delivery-error" style="display:none;"></p>
         </div>
 
         <div class="card">
           <h3 style="margin-top:0;">↩️ Record a Return</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Unsold stock returned to the store at end of route.</p>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">For general unsold stock at end of route (not tied to a specific order).</p>
           <div class="field">
             <label>Product</label>
             <select id="return-product"><option value="">— choose a product —</option></select>
@@ -137,15 +149,15 @@
 
     function populateProductSelects() {
       const opts = storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
-      ['issue-product','sale-product','return-product'].forEach(id => {
+      ['issue-product','delivery-product','return-product'].forEach(id => {
         document.getElementById(id).innerHTML = '<option value="">— choose a product —</option>' + opts;
       });
     }
 
-    document.getElementById('sale-product').addEventListener('change', (e) => {
+    document.getElementById('delivery-product').addEventListener('change', (e) => {
       const opt = e.target.options[e.target.selectedIndex];
       const price = opt.dataset.price;
-      if (price) document.getElementById('sale-price').value = price;
+      if (price) document.getElementById('delivery-price').value = price;
     });
 
     async function loadLorryStock() {
@@ -200,17 +212,17 @@
       alert('✅ Stock loaded onto the lorry.');
     }
 
-    // ─── RECORD SALE (offline-capable) ───────────────────────────────────────
-    async function recordSale() {
-      const errorEl = document.getElementById('sale-error');
+    // ─── DELIVERY OUTCOME: DELIVERED (offline-capable, same as a lorry sale) ──
+    async function markDelivered() {
+      const errorEl = document.getElementById('delivery-error');
       errorEl.style.display = 'none';
-      const select = document.getElementById('sale-product');
+      const select = document.getElementById('delivery-product');
       const productId = select.value;
-      const qty = parseFloat(document.getElementById('sale-qty').value);
-      const unitPrice = parseFloat(document.getElementById('sale-price').value);
-      const customerName = document.getElementById('sale-customer').value.trim();
-      const customerPhone = document.getElementById('sale-phone').value.trim();
-      const paymentMethod = document.getElementById('sale-payment').value;
+      const qty = parseFloat(document.getElementById('delivery-qty').value);
+      const unitPrice = parseFloat(document.getElementById('delivery-price').value);
+      const customerName = document.getElementById('delivery-customer').value.trim();
+      const customerPhone = document.getElementById('delivery-phone').value.trim();
+      const paymentMethod = document.getElementById('delivery-payment').value;
 
       if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
       if (!qty || qty <= 0 || isNaN(unitPrice)) { errorEl.textContent = 'Please enter a valid quantity and price.'; errorEl.style.display = 'block'; return; }
@@ -238,15 +250,50 @@
         updateLorrySyncBadge((await getPendingLorrySales()).length);
       }
 
-      document.getElementById('sale-product').value = '';
-      document.getElementById('sale-qty').value = '';
-      document.getElementById('sale-price').value = '';
-      document.getElementById('sale-customer').value = '';
-      document.getElementById('sale-phone').value = '';
-      alert(navigator.onLine ? '✅ Sale recorded.' : '✅ Sale saved offline — will sync when back online.');
+      clearDeliveryForm();
+      alert(navigator.onLine ? '✅ Delivered — sale recorded.' : '✅ Delivered — saved offline, will sync when back online.');
     }
 
-    // ─── RECORD RETURN (needs live connection — touches store stock) ────────
+    // ─── DELIVERY OUTCOME: REJECTED (needs live connection — touches store stock) ──
+    async function markRejected() {
+      const errorEl = document.getElementById('delivery-error');
+      errorEl.style.display = 'none';
+      const productId = document.getElementById('delivery-product').value;
+      const qty = parseFloat(document.getElementById('delivery-qty').value);
+      const condition = document.getElementById('delivery-condition').value;
+      const reason = document.getElementById('delivery-reason').value.trim();
+      const customerName = document.getElementById('delivery-customer').value.trim();
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Recording a rejected delivery needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
+
+      const fullReason = customerName
+        ? `Rejected by ${customerName}${reason ? ' — ' + reason : ''}`
+        : (reason || 'Customer rejected delivery');
+
+      const { error } = await supabaseClient.rpc('record_lorry_return', {
+        p_store_product_id: productId, p_quantity: qty, p_reason: fullReason, p_staff_id: currentStaff.id, p_condition: condition
+      });
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      clearDeliveryForm();
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      alert(condition === 'good' ? '✅ Rejected — stock returned to store.' : '✅ Rejected — damaged stock written off.');
+    }
+
+    function clearDeliveryForm() {
+      document.getElementById('delivery-product').value = '';
+      document.getElementById('delivery-qty').value = '';
+      document.getElementById('delivery-price').value = '';
+      document.getElementById('delivery-customer').value = '';
+      document.getElementById('delivery-phone').value = '';
+      document.getElementById('delivery-payment').value = 'cash';
+      document.getElementById('delivery-condition').value = 'good';
+      document.getElementById('delivery-reason').value = '';
+    }
+
+    // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
     async function recordReturn() {
       const errorEl = document.getElementById('return-error');
       errorEl.style.display = 'none';
