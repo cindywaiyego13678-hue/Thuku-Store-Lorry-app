@@ -145,11 +145,19 @@
         </datalist>
       </div>
       <div class="field"><label>Type (optional)</label><input id="pm-category" placeholder="e.g. Bedding"></div>
-      <div class="field"><label>Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
+      <div class="field" id="pm-stock-mode-field" style="display:none;">
+        <label>What are you doing?</label>
+        <select id="pm-stock-mode" onchange="updateStoreStockLabel()">
+          <option value="add">➕ Add new stock arriving (most common)</option>
+          <option value="set">✏️ Correct to an exact total (e.g. after a stock take)</option>
+        </select>
+      </div>
+      <div class="field"><label id="pm-stock-label">Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
       <div class="field"><label>Reorder Level</label><input id="pm-reorder" type="number" min="0" step="any" placeholder="e.g. 5"></div>
       <div class="field"><label>Cost Price (Ksh)</label><input id="pm-cost" type="number" placeholder="e.g. 8000"></div>
       <div class="field"><label>Selling Price (Ksh)</label><input id="pm-price" type="number" placeholder="e.g. 12000"></div>
     </div>
+    <p id="pm-stock-preview" style="font-size:0.85rem; color:var(--muted); margin-top:-10px;"></p>
     <button onclick="saveProduct()" id="pm-save-btn" style="width:100%;">Save Product</button>
     <p class="error-text" id="pm-error" style="display:none;"></p>
   </div>
@@ -379,6 +387,10 @@
       document.getElementById('pm-id').value = '';
       ['pm-name','pm-size','pm-manufacturer','pm-density','pm-category','pm-stock','pm-reorder','pm-cost','pm-price'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('pm-reorder').value = 5;
+      // New product: no existing stock to add on top of, so just a plain quantity field.
+      document.getElementById('pm-stock-mode-field').style.display = 'none';
+      document.getElementById('pm-stock-label').textContent = 'Stock Quantity';
+      document.getElementById('pm-stock-preview').textContent = '';
       document.getElementById('pm-error').style.display = 'none';
       document.getElementById('product-modal').style.display = 'block';
       document.getElementById('product-modal-overlay').style.display = 'block';
@@ -394,14 +406,43 @@
       document.getElementById('pm-manufacturer').value = p.manufacturer || '';
       document.getElementById('pm-density').value = p.density || '';
       document.getElementById('pm-category').value = p.category || '';
-      document.getElementById('pm-stock').value = p.stock_quantity ?? 0;
       document.getElementById('pm-reorder').value = p.reorder_level ?? 5;
       document.getElementById('pm-cost').value = p.cost ?? '';
       document.getElementById('pm-price').value = p.price ?? '';
+      // Editing: default to "Add" mode with a blank field, so typing a number
+      // adds to existing stock instead of silently overwriting it.
+      document.getElementById('pm-stock-mode-field').style.display = 'block';
+      document.getElementById('pm-stock-mode').value = 'add';
+      document.getElementById('pm-stock').value = '';
+      updateStoreStockLabel();
       document.getElementById('pm-error').style.display = 'none';
       document.getElementById('product-modal').style.display = 'block';
       document.getElementById('product-modal-overlay').style.display = 'block';
     }
+
+    function updateStoreStockLabel() {
+      const mode = document.getElementById('pm-stock-mode').value;
+      document.getElementById('pm-stock-label').textContent =
+        mode === 'add' ? 'How many units are being added?' : 'What is the correct total stock count?';
+      updateStoreStockPreview();
+    }
+
+    function updateStoreStockPreview() {
+      const id = document.getElementById('pm-id').value;
+      const previewEl = document.getElementById('pm-stock-preview');
+      if (!id) { previewEl.textContent = ''; return; } // new product, no preview needed
+      const p = storeProducts.find(x => x.id === id);
+      const mode = document.getElementById('pm-stock-mode').value;
+      const val = parseFloat(document.getElementById('pm-stock').value);
+      if (!p || isNaN(val) || val < 0) { previewEl.textContent = ''; return; }
+      if (mode === 'add') {
+        previewEl.textContent = `New total: ${p.stock_quantity} + ${val} = ${p.stock_quantity + val}`;
+      } else {
+        previewEl.textContent = `Stock will be set to exactly ${val} (was ${p.stock_quantity}).`;
+      }
+    }
+
+    document.getElementById('pm-stock').addEventListener('input', updateStoreStockPreview);
 
     function closeProductModal() {
       document.getElementById('product-modal').style.display = 'none';
@@ -418,7 +459,7 @@
       const manufacturer = document.getElementById('pm-manufacturer').value.trim();
       const density = document.getElementById('pm-density').value.trim();
       const category = document.getElementById('pm-category').value.trim();
-      const stock_quantity = parseFloat(document.getElementById('pm-stock').value);
+      const enteredStock = parseFloat(document.getElementById('pm-stock').value);
       const reorder_level = parseFloat(document.getElementById('pm-reorder').value);
       const cost = parseFloat(document.getElementById('pm-cost').value);
       const price = parseFloat(document.getElementById('pm-price').value);
@@ -429,12 +470,24 @@
         return;
       }
 
+      // "Add" mode always adds on top of the live current stock — it never
+      // overwrites it, even if the number typed was meant additively.
+      let stock_quantity;
+      if (id) {
+        const existing = storeProducts.find(p => p.id === id);
+        const mode = document.getElementById('pm-stock-mode').value;
+        const val = isNaN(enteredStock) ? 0 : enteredStock;
+        stock_quantity = mode === 'add' ? (existing ? existing.stock_quantity : 0) + val : val;
+      } else {
+        stock_quantity = isNaN(enteredStock) ? 0 : enteredStock;
+      }
+
       const btn = document.getElementById('pm-save-btn');
       btn.disabled = true; btn.textContent = 'Saving...';
 
       const payload = {
         name, size: size || null, manufacturer: manufacturer || null, density: density || null, category: category || null,
-        stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
+        stock_quantity,
         reorder_level: isNaN(reorder_level) ? 5 : reorder_level,
         cost: isNaN(cost) ? 0 : cost,
         price
