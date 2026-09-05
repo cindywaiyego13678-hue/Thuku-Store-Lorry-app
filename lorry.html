@@ -42,42 +42,27 @@
 
         <div class="card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">Current Lorry Stock</h3>
-          <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Tap a product to record its delivery outcome — no need to search the dropdown.</p>
+          <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Adjust the price for any item if it differs from the standard price — leftover stock is sold at the price shown here when you close the route.</p>
           <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
         </div>
 
         <div class="card">
-          <h3 style="margin-top:0;">🧾 Today's Lorry Sales</h3>
-          <div id="lorry-sales-summary"></div>
+          <h3 style="margin-top:0;">🔚 Close Route / End of Day</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Everything still on the lorry (after returns are recorded) gets marked SOLD at the prices shown above. Only record returns for stock that actually came back.</p>
+          <div class="field">
+            <label>Payment method for these sales</label>
+            <select id="close-route-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="mixed">Mixed / Various</option></select>
+          </div>
+          <button onclick="closeRoute()" style="width:100%; background:#1a7f37;">✅ Close Route — Mark Remaining Stock as Sold</button>
+          <p class="error-text" id="close-route-error" style="display:none;"></p>
         </div>
       </div>
 
-      <!-- RIGHT: Delivery outcome / end-of-route return -->
+      <!-- RIGHT: Returns + profit report -->
       <div>
         <div class="card" style="margin-bottom:18px;">
-          <h3 style="margin-top:0;">🚚 Record Delivery Outcome</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Reached the customer? Record whether they took the order or not.</p>
-          <div class="field">
-            <label>Product</label>
-            <input type="text" id="delivery-product-search" list="delivery-product-options" placeholder="Type to search product..." autocomplete="off">
-            <input type="hidden" id="delivery-product">
-            <datalist id="delivery-product-options"></datalist>
-          </div>
-          <div style="display:flex; gap:10px;">
-            <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="delivery-qty" min="0.01" step="any" placeholder="1"></div>
-            <div class="field" style="flex:1;"><label>Unit Price (Ksh)</label><input type="number" id="delivery-price" placeholder="e.g. 1500"></div>
-          </div>
-          <div class="field">
-            <label>Payment method <span style="color:var(--muted); font-weight:normal;">(if delivered)</span></label>
-            <select id="delivery-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
-          </div>
-          <button onclick="markDelivered()" style="width:100%;">✅ Delivered</button>
-          <p class="error-text" id="delivery-error" style="display:none;"></p>
-        </div>
-
-        <div class="card">
           <h3 style="margin-top:0;">↩️ Record a Return</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">For general unsold stock at end of route (not tied to a specific order).</p>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">This is the only outcome you need to log by hand — anything not returned here is treated as sold when you close the route.</p>
           <div class="field">
             <label>Product</label>
             <input type="text" id="return-product-search" list="return-product-options" placeholder="Type to search product..." autocomplete="off">
@@ -96,6 +81,16 @@
           <button class="secondary" onclick="recordReturn()" style="width:100%;">Return to Store</button>
           <p class="error-text" id="return-error" style="display:none;"></p>
         </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">📊 Lorry Profit Report</h3>
+          <div class="field" style="max-width:220px;">
+            <label>Date</label>
+            <input type="date" id="profit-report-date">
+          </div>
+          <div id="profit-report-summary"></div>
+          <div id="profit-report-breakdown" style="margin-top:10px;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -107,8 +102,7 @@
     let currentStaff = null;
     let lorryStock = [];
     let storeProducts = [];
-
-    const LORRY_SALES_SUMMARY_KEY = 'lorry_sales_summary_v1';
+    let closeRoutePrices = {}; // { store_product_id: price } — user overrides for close-route selling price
 
     (async () => {
       currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
@@ -119,8 +113,10 @@
       if (!['admin','store_staff'].includes(currentStaff.role)) {
         document.getElementById('issue-card').style.display = 'none';
       }
+      document.getElementById('profit-report-date').value = todayDateInputValue();
+      document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      renderSalesSummary();
+      loadProfitReport();
     })();
 
     function renderNav() {
@@ -153,9 +149,6 @@
       const datalist = document.getElementById('issue-product-options');
       datalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
 
-      const deliveryDatalist = document.getElementById('delivery-product-options');
-      deliveryDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
-
       const returnDatalist = document.getElementById('return-product-options');
       returnDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
     }
@@ -168,13 +161,6 @@
     document.getElementById('issue-product-search').addEventListener('input', (e) => {
       const match = findProductByName(e.target.value.trim());
       document.getElementById('issue-product').value = match ? match.id : '';
-    });
-
-    // ─── SEARCH: resolve typed product name for Record Delivery Outcome ──
-    document.getElementById('delivery-product-search').addEventListener('input', (e) => {
-      const match = findProductByName(e.target.value.trim());
-      document.getElementById('delivery-product').value = match ? match.id : '';
-      if (match) document.getElementById('delivery-price').value = match.price;
     });
 
     // ─── SEARCH: resolve typed product name for Record a Return ──
@@ -190,7 +176,7 @@
         return;
       }
       const { data, error } = await supabaseClient
-        .from('lorry_stock').select('*, store_products(name, size, manufacturer)').gt('quantity', 0);
+        .from('lorry_stock').select('*, store_products(name, size, manufacturer, price)').gt('quantity', 0);
       if (error) { console.error(error); return; }
       lorryStock = data || [];
       cacheSet('lorry_stock', lorryStock);
@@ -202,40 +188,28 @@
       if (!lorryStock.length) { el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Qty on Lorry</th></tr></thead>
+          <thead><tr><th>Product</th><th>Qty on Lorry</th><th>Price (Ksh)</th></tr></thead>
           <tbody>
-            ${lorryStock.map(r => `
-              <tr
-                style="cursor:pointer;"
-                title="Tap to fill Record Delivery Outcome"
-                onclick="fillDeliveryProduct('${r.store_product_id}')"
-              >
-                <td>${escapeHtml(displayName(r.store_products || {}))}</td>
+            ${lorryStock.map(r => {
+              const sp = r.store_products || {};
+              const defaultPrice = closeRoutePrices[r.store_product_id] ?? (sp.price ?? '');
+              return `
+              <tr>
+                <td>${escapeHtml(displayName(sp))}</td>
                 <td><span class="badge in_stock">${r.quantity}</span></td>
-              </tr>
-            `).join('')}
+                <td>
+                  <input type="number" min="0" step="any" style="width:100px;"
+                    value="${defaultPrice}"
+                    onchange="updateClosePrice('${r.store_product_id}', this.value)">
+                </td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>`;
     }
 
-    // ─── TAP A LORRY-STOCK ROW: auto-fill the delivery form ──
-    function fillDeliveryProduct(productId) {
-      const product = storeProducts.find(p => String(p.id) === String(productId));
-      if (!product) return;
-
-      document.getElementById('delivery-product').value = productId;
-      document.getElementById('delivery-product-search').value = displayName(product);
-      document.getElementById('delivery-price').value = product.price;
-
-      const qtyInput = document.getElementById('delivery-qty');
-      if (!qtyInput.value) qtyInput.value = 1;
-
-      document.getElementById('delivery-product-search')
-        .closest('.card')
-        .scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-      qtyInput.focus();
-      qtyInput.select();
+    function updateClosePrice(productId, value) {
+      closeRoutePrices[productId] = parseFloat(value);
     }
 
     // ─── ISSUE STOCK TO LORRY (needs live connection — touches store stock) ──
@@ -263,140 +237,51 @@
       alert('✅ Stock loaded onto the lorry.');
     }
 
-    // ─── DELIVERY OUTCOME: DELIVERED (offline-capable, same as a lorry sale) ──
-    async function markDelivered() {
-      const errorEl = document.getElementById('delivery-error');
+    // ─── CLOSE ROUTE: mark everything still on the lorry as SOLD ──
+    async function closeRoute() {
+      const errorEl = document.getElementById('close-route-error');
       errorEl.style.display = 'none';
-      const productId = document.getElementById('delivery-product').value;
-      const qty = parseFloat(document.getElementById('delivery-qty').value);
-      const unitPrice = parseFloat(document.getElementById('delivery-price').value);
-      const paymentMethod = document.getElementById('delivery-payment').value;
+      const paymentMethod = document.getElementById('close-route-payment').value;
+      const rowsToSell = lorryStock.filter(r => r.quantity > 0);
 
-      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
-      if (!qty || qty <= 0 || isNaN(unitPrice)) { errorEl.textContent = 'Please enter a valid quantity and price.'; errorEl.style.display = 'block'; return; }
+      if (!rowsToSell.length) { alert('No stock left on the lorry to close out.'); return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Closing the route needs internet (it records sales against live stock).'; errorEl.style.display = 'block'; return; }
 
-      const product = storeProducts.find(p => String(p.id) === String(productId));
-      const productName = product ? displayName(product) : 'Unknown product';
-      const saleData = {
-        store_product_id: productId, product_name: productName, quantity: qty, unit_price: unitPrice,
-        customer_name: null, customer_phone: null,
-        payment_method: paymentMethod, staff_id: currentStaff.id
-      };
+      const confirmed = confirm(`This will mark ${rowsToSell.length} product(s) still on the lorry as SOLD at the prices shown. This can't be undone automatically — continue?`);
+      if (!confirmed) return;
 
-      if (navigator.onLine) {
+      let successCount = 0;
+      const failed = [];
+
+      for (const row of rowsToSell) {
+        const sp = row.store_products || {};
+        const price = parseFloat(closeRoutePrices[row.store_product_id] ?? sp.price ?? 0);
+        if (!price || price <= 0) { failed.push(`${displayName(sp)} (no valid price set)`); continue; }
+
         const { error } = await supabaseClient.rpc('record_lorry_sale', {
-          p_store_product_id: productId, p_quantity: qty, p_unit_price: unitPrice,
-          p_customer_name: null, p_customer_phone: null,
-          p_payment_method: paymentMethod, p_staff_id: currentStaff.id, p_synced: true
+          p_store_product_id: row.store_product_id,
+          p_quantity: row.quantity,
+          p_unit_price: price,
+          p_customer_name: null,
+          p_customer_phone: null,
+          p_payment_method: paymentMethod,
+          p_staff_id: currentStaff.id,
+          p_synced: true
         });
-        if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
-        await loadLorryStock();
+
+        if (error) { failed.push(`${displayName(sp)}: ${error.message}`); continue; }
+        successCount++;
+      }
+
+      await loadLorryStock();
+      await loadProfitReport();
+
+      if (failed.length) {
+        errorEl.textContent = `Closed ${successCount} product(s). Could not close: ${failed.join('; ')}`;
+        errorEl.style.display = 'block';
       } else {
-        await queueLorrySaleOffline(saleData);
-        // Optimistically reflect the sale in the cached lorry stock so the seller sees it update
-        const row = lorryStock.find(r => r.store_product_id === productId);
-        if (row) { row.quantity = Math.max(0, row.quantity - qty); renderLorryStock(); cacheSet('lorry_stock', lorryStock); }
-        updateLorrySyncBadge((await getPendingLorrySales()).length);
+        alert(`✅ Route closed — ${successCount} product(s) marked as sold.`);
       }
-
-      recordSaleInTodaySummary(productName, qty, unitPrice, paymentMethod);
-
-      clearDeliveryForm();
-      alert(navigator.onLine ? '✅ Delivered — sale recorded.' : '✅ Delivered — saved offline, will sync when back online.');
-    }
-
-    function clearDeliveryForm() {
-      document.getElementById('delivery-product').value = '';
-      document.getElementById('delivery-product-search').value = '';
-      document.getElementById('delivery-qty').value = '';
-      document.getElementById('delivery-price').value = '';
-      document.getElementById('delivery-payment').value = 'cash';
-    }
-
-    // ─── TODAY'S LORRY SALES SUMMARY (local, per device, resets each day) ──
-    function todayKey() {
-      return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    }
-
-    function getTodaySummary() {
-      let stored;
-      try {
-        stored = JSON.parse(localStorage.getItem(LORRY_SALES_SUMMARY_KEY));
-      } catch (e) {
-        stored = null;
-      }
-      if (!stored || stored.date !== todayKey()) {
-        stored = { date: todayKey(), deliveries: [] };
-        localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(stored));
-      }
-      return stored;
-    }
-
-    function recordSaleInTodaySummary(productName, qty, unitPrice, paymentMethod) {
-      const summary = getTodaySummary();
-      summary.deliveries.push({
-        name: productName,
-        qty,
-        unitPrice,
-        total: qty * unitPrice,
-        paymentMethod,
-        time: new Date().toISOString()
-      });
-      localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(summary));
-      renderSalesSummary();
-    }
-
-    function renderSalesSummary() {
-      const el = document.getElementById('lorry-sales-summary');
-      if (!el) return;
-
-      const summary = getTodaySummary();
-      const deliveries = summary.deliveries;
-
-      if (!deliveries.length) {
-        el.innerHTML = '<div class="empty-state">No deliveries recorded yet today.</div>';
-        return;
-      }
-
-      const totalValue = deliveries.reduce((sum, d) => sum + d.total, 0);
-      const totalItems = deliveries.reduce((sum, d) => sum + d.qty, 0);
-
-      el.innerHTML = `
-        <div style="
-          display:flex;
-          justify-content:space-between;
-          align-items:baseline;
-          margin-bottom:10px;
-        ">
-          <span style="font-size:0.85rem; color:var(--muted);">
-            ${deliveries.length} delivery${deliveries.length === 1 ? '' : 'ies'} · ${totalItems} item(s)
-          </span>
-          <span style="font-size:1.3rem; font-weight:800;">
-            Ksh ${totalValue.toLocaleString()}
-          </span>
-        </div>
-        <div style="max-height:220px; overflow-y:auto;">
-          ${deliveries.slice().reverse().map(d => `
-            <div style="
-              display:flex;
-              justify-content:space-between;
-              align-items:center;
-              gap:8px;
-              padding:6px 0;
-              border-bottom:1px solid var(--border);
-              font-size:0.85rem;
-            ">
-              <div>
-                <strong>${escapeHtml(d.name)}</strong>
-                <div style="color:var(--muted); font-size:0.75rem;">
-                  ${d.qty} × Ksh ${d.unitPrice.toLocaleString()} · ${escapeHtml(d.paymentMethod)}
-                </div>
-              </div>
-              <span style="font-weight:600;">Ksh ${d.total.toLocaleString()}</span>
-            </div>
-          `).join('')}
-        </div>
-      `;
     }
 
     // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
@@ -424,6 +309,91 @@
       document.getElementById('return-reason').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
       alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — removed from lorry, not added back to store stock.');
+    }
+
+    // ─── LORRY PROFIT REPORT (from lorry_sales — revenue, cost, profit for a chosen day) ──
+    function todayDateInputValue() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    async function loadProfitReport() {
+      const dateInput = document.getElementById('profit-report-date');
+      if (!dateInput.value) dateInput.value = todayDateInputValue();
+      const day = dateInput.value;
+      const start = `${day}T00:00:00`;
+      const end = `${day}T23:59:59.999`;
+
+      const summaryEl = document.getElementById('profit-report-summary');
+      const breakdownEl = document.getElementById('profit-report-breakdown');
+      summaryEl.innerHTML = '<div class="empty-state">Loading...</div>';
+      breakdownEl.innerHTML = '';
+
+      if (!navigator.onLine) {
+        summaryEl.innerHTML = '<div class="empty-state">Profit report needs internet.</div>';
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from('lorry_sales')
+        .select('product_name, quantity, unit_price, unit_cost, created_at')
+        .gte('created_at', start)
+        .lte('created_at', end);
+
+      if (error) {
+        summaryEl.innerHTML = `<div class="empty-state">Error loading report: ${escapeHtml(error.message)}</div>`;
+        return;
+      }
+
+      const sales = data || [];
+      if (!sales.length) {
+        summaryEl.innerHTML = '<div class="empty-state">No sales recorded for this day.</div>';
+        return;
+      }
+
+      const revenue = sales.reduce((sum, s) => sum + (s.quantity * s.unit_price), 0);
+      const cost = sales.reduce((sum, s) => sum + (s.quantity * (s.unit_cost || 0)), 0);
+      const profit = revenue - cost;
+
+      summaryEl.innerHTML = `
+        <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+          <div>
+            <div style="color:var(--muted); font-size:0.75rem;">Revenue</div>
+            <div style="font-weight:800; font-size:1.15rem;">Ksh ${revenue.toLocaleString()}</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:0.75rem;">Cost</div>
+            <div style="font-weight:800; font-size:1.15rem;">Ksh ${cost.toLocaleString()}</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:0.75rem;">Profit</div>
+            <div style="font-weight:800; font-size:1.15rem; color:${profit >= 0 ? '#1a7f37' : '#c0392b'};">Ksh ${profit.toLocaleString()}</div>
+          </div>
+        </div>
+      `;
+
+      const byProduct = {};
+      sales.forEach(s => {
+        if (!byProduct[s.product_name]) byProduct[s.product_name] = { qty: 0, revenue: 0, cost: 0 };
+        byProduct[s.product_name].qty += s.quantity;
+        byProduct[s.product_name].revenue += s.quantity * s.unit_price;
+        byProduct[s.product_name].cost += s.quantity * (s.unit_cost || 0);
+      });
+
+      breakdownEl.innerHTML = `
+        <table>
+          <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th><th>Profit</th></tr></thead>
+          <tbody>
+            ${Object.entries(byProduct).map(([name, d]) => `
+              <tr>
+                <td>${escapeHtml(name)}</td>
+                <td>${d.qty}</td>
+                <td>Ksh ${d.revenue.toLocaleString()}</td>
+                <td>Ksh ${(d.revenue - d.cost).toLocaleString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
     }
 
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
