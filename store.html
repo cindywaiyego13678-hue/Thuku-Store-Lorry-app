@@ -3,34 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Store — Thuku Store &amp; Lorry</title>
+<title>Lorry — Thuku Store &amp; Lorry</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>
-  .store-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; }
-  @media (max-width: 900px) { .store-layout { grid-template-columns: 1fr; } }
-  .transfer-item-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border,#e2e8f0); font-size:0.9rem; gap:10px; }
-  .transfer-item-row:last-child { border-bottom:none; }
-  .transfer-item-name { flex:1; font-weight:600; }
-  .transfer-qty-input { width:70px; padding:4px 8px; border:1px solid var(--border,#e2e8f0); border-radius:6px; font-size:0.9rem; }
-  .transfer-items-box { border:1px solid var(--border,#e2e8f0); border-radius:8px; padding:8px 12px; min-height:80px; max-height:220px; overflow-y:auto; margin:10px 0; background:var(--bg,#f8fafc); }
-  .empty-transfer { text-align:center; color:var(--muted,#6b7280); padding:20px 0; font-size:0.9rem; }
-  .summary-row { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
-  .summary-box { flex:1; min-width:120px; background:var(--bg,#f8fafc); border-radius:10px; padding:12px 16px; text-align:center; }
-  .summary-box .label { font-size:0.78rem; color:var(--muted,#6b7280); }
-  .summary-box .value { font-size:1.4rem; font-weight:800; margin-top:2px; }
-  .pay-badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.75rem; font-weight:700; }
-  .pay-paid { background:#d1fae5; color:#065f46; }
-  .pay-unpaid { background:#fee2e2; color:#991b1b; }
-  .pay-partial { background:#fef3c7; color:#92400e; }
-</style>
 </head>
 <body>
   <div class="topbar">
-    <h1>🏭 Store</h1>
+    <h1>🚚 Lorry</h1>
     <div style="display:flex; align-items:center; gap:12px;">
+      <span id="sync-badge"></span>
       <span class="role-tag" id="staff-name">...</span>
       <button class="secondary" onclick="logout()" style="color:#fff; border-color:#3a5169;">Logout</button>
     </div>
@@ -39,814 +22,461 @@
   <div class="container">
     <div class="nav-tabs" id="nav-tabs"></div>
 
-    <div id="low-stock-banner" style="display:none; background:#fef3c7; color:#92400e; border-radius:8px; padding:10px 14px; font-size:0.9rem; margin-bottom:16px; font-weight:600;"></div>
+    <div class="grid" style="grid-template-columns: 1fr 1fr; gap:18px;">
 
-    <div class="summary-row">
-      <div class="summary-box"><div class="label">Products in Store</div><div class="value" id="sum-products">—</div></div>
-      <div class="summary-box"><div class="label">Store Stock Value (buying price)</div><div class="value" id="sum-value">—</div></div>
-      <div class="summary-box"><div class="label">Unpaid Transfers</div><div class="value" id="sum-unpaid" style="color:#dc2626;">—</div></div>
-      <div class="summary-box" id="profit-box" style="display:none;"><div class="label">Lorry Profit (Today)</div><div class="value" id="sum-profit" style="color:#059669;">—</div></div>
-      <div class="summary-box" id="loss-box" style="display:none;"><div class="label">Damaged Stock Loss (Today)</div><div class="value" id="sum-loss" style="color:#dc2626;">—</div></div>
-    </div>
-
-    <div class="store-layout">
-
-      <!-- LEFT: Store inventory -->
+      <!-- LEFT: Lorry stock + issue from store -->
       <div>
-        <div class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-            <h3 style="margin:0;">📦 Store Inventory</h3>
-            <button onclick="openProductModal()">+ Add Product</button>
-          </div>
-          <div class="field"><input type="text" id="store-search" placeholder="Search by name, size, or manufacturer..."></div>
-          <div id="store-table"><div class="empty-state">Loading...</div></div>
-        </div>
-      </div>
-
-      <!-- RIGHT: Restock + Transfer to shop + history -->
-      <div>
-        <div class="card" style="margin-bottom:18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 style="margin:0;">📥 Restock Store</h3>
-            <button class="secondary" onclick="clearRestock()" style="font-size:0.8rem; padding:5px 10px;">Clear</button>
-          </div>
+        <div class="card" id="issue-card" style="margin-bottom:18px;">
+          <h3 style="margin-top:0;">📦 Load Stock onto Lorry</h3>
           <div class="field">
-            <label>Select product</label>
-            <select id="restock-product-select"><option value="">— choose a product —</option></select>
+            <label>Product</label>
+            <input type="text" id="issue-product-search" list="issue-product-options" placeholder="Type to search product..." autocomplete="off">
+            <input type="hidden" id="issue-product">
+            <datalist id="issue-product-options"></datalist>
           </div>
-          <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
-            <div class="field" style="flex:1; margin:0; min-width:100px;">
-              <label>Quantity received</label>
-              <input type="number" id="restock-qty" min="0.01" step="any" placeholder="e.g. 20">
-            </div>
-            <div class="field" style="flex:1; margin:0; min-width:100px;">
-              <label>Buying price per unit (Ksh)</label>
-              <input type="number" id="restock-cost" min="0" step="any" placeholder="current buying price">
-            </div>
-            <button onclick="addRestockItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
-          </div>
-          <div class="transfer-items-box" id="restock-items-box"><div class="empty-transfer">No items added yet.</div></div>
-          <div class="grid grid-2">
-            <div class="field"><label>Supplier (optional)</label><input type="text" id="restock-supplier" placeholder="e.g. Ndovu Mattresses Ltd"></div>
-            <div class="field"><label>Notes (optional)</label><input type="text" id="restock-notes" placeholder="e.g. Weekly delivery"></div>
-          </div>
-          <button onclick="submitRestock()" id="submit-restock-btn" style="width:100%; margin-top:4px;">📥 Add to Store</button>
-          <p class="error-text" id="restock-error" style="display:none;"></p>
+          <div class="field"><label>Quantity</label><input type="number" id="issue-qty" min="0.01" step="any" placeholder="e.g. 10"></div>
+          <div class="field"><label>Notes (optional)</label><input type="text" id="issue-notes" placeholder="e.g. Morning route — Kasarani"></div>
+          <button onclick="issueStock()" style="width:100%;">Load onto Lorry</button>
+          <p class="error-text" id="issue-error" style="display:none;"></p>
         </div>
 
         <div class="card" style="margin-bottom:18px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <h3 style="margin:0;">🚚 Transfer to Shop</h3>
-            <button class="secondary" onclick="clearTransfer()" style="font-size:0.8rem; padding:5px 10px;">Clear</button>
-          </div>
-          <div class="field">
-            <label>Select product</label>
-            <select id="product-select"><option value="">— choose a product —</option></select>
-          </div>
-          <div style="display:flex; gap:10px; align-items:flex-end;">
-            <div class="field" style="flex:1; margin:0;">
-              <label>Quantity to transfer</label>
-              <input type="number" id="transfer-qty" min="0.01" step="any" placeholder="e.g. 5">
-            </div>
-            <button onclick="addTransferItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
-          </div>
-          <div class="transfer-items-box" id="transfer-items-box"><div class="empty-transfer">No items added yet.</div></div>
-          <div class="field"><label>Notes (optional)</label><input type="text" id="transfer-notes" placeholder="e.g. Morning delivery — Friday"></div>
-          <button onclick="submitTransfer()" id="submit-transfer-btn" style="width:100%; margin-top:4px;">✅ Send to Shop</button>
-          <p class="error-text" id="transfer-error" style="display:none;"></p>
-        </div>
-
-        <div class="card" style="margin-bottom:18px;">
-          <h3 style="margin-top:0;">📋 Transfer History</h3>
-          <div id="history-table"><div class="empty-state">Loading...</div></div>
+          <h3 style="margin-top:0;">Current Lorry Stock</h3>
+          <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Tap a product to record its delivery outcome — no need to search the dropdown.</p>
+          <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
         </div>
 
         <div class="card">
-          <h3 style="margin-top:0;">🧾 Restock History</h3>
-          <div id="restock-history-table"><div class="empty-state">Loading...</div></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" id="report-card" style="display:none; margin-top:18px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
-        <h3 style="margin:0;">📊 Daily Report — Whole Store</h3>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input type="date" id="report-date" style="padding:6px 10px; border:1px solid var(--border,#e2e8f0); border-radius:6px;">
-          <button onclick="loadDailyReport()" style="margin:0;">Load Report</button>
+          <h3 style="margin-top:0;">🧾 Today's Lorry Sales</h3>
+          <div id="lorry-sales-summary"></div>
         </div>
       </div>
 
-      <h4 style="margin:16px 0 8px;">Lorry Sales — Profit by Product</h4>
-      <div id="report-profit-table"><div class="empty-state">Pick a date and click "Load Report".</div></div>
-      <div id="report-profit-total" style="text-align:right; font-weight:700; margin-top:8px;"></div>
+      <!-- RIGHT: Delivery outcome / end-of-route return -->
+      <div>
+        <div class="card" style="margin-bottom:18px;">
+          <h3 style="margin-top:0;">🚚 Record Delivery Outcome</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Tick everything delivered this stop, adjust quantity/price if needed, then submit once.</p>
+          <div id="delivery-checklist"><div class="empty-state">Loading lorry stock...</div></div>
+          <div class="field" style="margin-top:12px;">
+            <label>Payment method <span style="color:var(--muted); font-weight:normal;">(applies to all ticked items)</span></label>
+            <select id="delivery-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option></select>
+          </div>
+          <button id="deliver-batch-btn" onclick="recordDeliveredBatch()" style="width:100%;">✅ Record Delivered Items</button>
+          <p class="error-text" id="delivery-error" style="display:none;"></p>
+        </div>
 
-      <h4 style="margin:24px 0 8px;">Store → Shop Transfers — Profit by Product</h4>
-      <div id="report-transfer-table"><div class="empty-state">—</div></div>
-      <div id="report-transfer-total" style="text-align:right; font-weight:700; margin-top:8px;"></div>
-
-      <div style="text-align:right; font-weight:800; margin-top:16px; padding-top:14px; border-top:2px solid var(--border,#e2e8f0); font-size:1.15rem;" id="report-grand-total"></div>
-
-      <h4 style="margin:24px 0 8px;">Returns — Goods & Cause</h4>
-      <div id="report-returns-table"><div class="empty-state">—</div></div>
-      <div id="report-loss-total" style="text-align:right; font-weight:800; margin-top:8px; font-size:1.05rem; color:#dc2626;"></div>
+        <div class="card">
+          <h3 style="margin-top:0;">↩️ Record a Return</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">For general unsold stock at end of route (not tied to a specific order).</p>
+          <div class="field">
+            <label>Product</label>
+            <input type="text" id="return-product-search" list="return-product-options" placeholder="Type to search product..." autocomplete="off">
+            <input type="hidden" id="return-product">
+            <datalist id="return-product-options"></datalist>
+          </div>
+          <div class="field"><label>Quantity</label><input type="number" id="return-qty" min="0.01" step="any" placeholder="e.g. 2"></div>
+          <div class="field">
+            <label>Condition</label>
+            <select id="return-condition">
+              <option value="good">Good — back into sellable store stock</option>
+              <option value="damaged">Damaged — write off, do not restock</option>
+            </select>
+          </div>
+          <div class="field"><label>Reason (optional)</label><input type="text" id="return-reason" placeholder="e.g. Unsold end of day, or how it got damaged"></div>
+          <button class="secondary" onclick="recordReturn()" style="width:100%;">Return to Store</button>
+          <p class="error-text" id="return-error" style="display:none;"></p>
+        </div>
+      </div>
     </div>
   </div>
-
-  <!-- Add/Edit Product Modal -->
-  <div id="product-modal" class="card" style="display:none; position:fixed; top:8%; left:50%; transform:translateX(-50%); width:92%; max-width:460px; z-index:50; max-height:84vh; overflow-y:auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-      <h3 style="margin:0;" id="pm-title">+ Add Product</h3>
-      <button class="secondary" onclick="closeProductModal()">Close</button>
-    </div>
-    <p style="color:var(--muted); font-size:0.85rem; margin-top:-10px;">
-      Use size + manufacturer to tell apart variants, e.g. "5x6 Mattress — Ndovu" vs "5x6 Mattress — Tuff".
-    </p>
-    <input type="hidden" id="pm-id">
-    <div class="grid grid-2">
-      <div class="field"><label>Name</label><input id="pm-name" placeholder="e.g. Mattress"></div>
-      <div class="field"><label>Size (optional)</label><input id="pm-size" placeholder="e.g. 5x6"></div>
-      <div class="field"><label>Manufacturer / Brand</label><input id="pm-manufacturer" placeholder="e.g. Ndovu, Tuff"></div>
-      <div class="field">
-        <label>Density (optional)</label>
-        <input id="pm-density" list="density-options" placeholder="e.g. High Density, Std, Med">
-        <datalist id="density-options">
-          <option value="High Density">
-          <option value="Medium Density">
-          <option value="Standard">
-          <option value="Normal Density">
-          <option value="Medium">
-        </datalist>
-      </div>
-      <div class="field"><label>Type (optional)</label><input id="pm-category" placeholder="e.g. Bedding"></div>
-      <div class="field" id="pm-stock-mode-field" style="display:none;">
-        <label>What are you doing?</label>
-        <select id="pm-stock-mode" onchange="updateStoreStockLabel()">
-          <option value="add">➕ Add new stock arriving (most common)</option>
-          <option value="set">✏️ Correct to an exact total (e.g. after a stock take)</option>
-        </select>
-      </div>
-      <div class="field"><label id="pm-stock-label">Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
-      <div class="field"><label>Reorder Level</label><input id="pm-reorder" type="number" min="0" step="any" placeholder="e.g. 5"></div>
-      <div class="field"><label>Buying Price (Ksh)</label><input id="pm-cost" type="number" placeholder="e.g. 8000"></div>
-      <div class="field"><label>Selling Price (Ksh)</label><input id="pm-price" type="number" placeholder="e.g. 12000"></div>
-    </div>
-    <p id="pm-stock-preview" style="font-size:0.85rem; color:var(--muted); margin-top:-10px;"></p>
-    <button onclick="saveProduct()" id="pm-save-btn" style="width:100%;">Save Product</button>
-    <p class="error-text" id="pm-error" style="display:none;"></p>
-  </div>
-  <div id="product-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:40;" onclick="closeProductModal()"></div>
 
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
+  <script src="js/lorry-offline-sync.js"></script>
   <script>
     let currentStaff = null;
+    let lorryStock = [];
     let storeProducts = [];
-    let transferItems = [];
+
+    const LORRY_SALES_SUMMARY_KEY = 'lorry_sales_summary_v1';
 
     (async () => {
-      currentStaff = await requireAuth(['admin','store_staff']);
+      currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
       if (!currentStaff) return;
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
-      await Promise.all([loadStoreProducts(), loadHistory(), loadRestockHistory()]);
-      if (currentStaff.role === 'admin') {
-        document.getElementById('report-card').style.display = '';
-        document.getElementById('report-date').value = new Date().toISOString().slice(0, 10);
-        await Promise.all([loadLorryProfit(), loadDamagedLoss(), loadDailyReport()]);
+      // Loading stock onto the lorry needs live store stock — only admin/store_staff can do it
+      if (!['admin','store_staff'].includes(currentStaff.role)) {
+        document.getElementById('issue-card').style.display = 'none';
       }
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      renderDeliveryChecklist();
+      renderSalesSummary();
     })();
-
-    async function loadLorryProfit() {
-      if (!navigator.onLine) return;
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-      const { data, error } = await supabaseClient.rpc('get_lorry_profit_summary', {
-        p_start: start.toISOString(), p_end: end.toISOString()
-      });
-      if (error || !data || !data.length) return;
-      const box = document.getElementById('profit-box');
-      box.style.display = '';
-      document.getElementById('sum-profit').textContent = `Ksh ${Math.round(data[0].profit).toLocaleString()}`;
-    }
-
-    async function loadDamagedLoss() {
-      if (!navigator.onLine) return;
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-      const { data, error } = await supabaseClient.rpc('get_damaged_loss_summary', {
-        p_start: start.toISOString(), p_end: end.toISOString()
-      });
-      if (error || !data || !data.length) return;
-      const box = document.getElementById('loss-box');
-      box.style.display = '';
-      document.getElementById('sum-loss').textContent = `Ksh ${Math.round(data[0].loss_value).toLocaleString()}`;
-    }
-
-    function dayRangeFor(dateStr) {
-      const [y, m, d] = dateStr.split('-').map(Number);
-      const start = new Date(y, m - 1, d);
-      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-      return { start: start.toISOString(), end: end.toISOString() };
-    }
-
-    function renderProfitTable(rows, tableElId, totalElId, emptyMsg) {
-      const el = document.getElementById(tableElId);
-      if (!rows || !rows.length) {
-        el.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
-        document.getElementById(totalElId).textContent = '';
-        return { revenue: 0, cost: 0, profit: 0 };
-      }
-      let totalRevenue = 0, totalCost = 0, totalProfit = 0;
-      el.innerHTML = `
-        <table>
-          <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty</th><th>Buying Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
-          <tbody>
-            ${rows.map(r => {
-              totalRevenue += Number(r.revenue); totalCost += Number(r.cost); totalProfit += Number(r.profit);
-              return `
-                <tr>
-                  <td>${escapeHtml(r.brand)}</td>
-                  <td>${escapeHtml(r.product_name)}</td>
-                  <td>${escapeHtml(r.size)}</td>
-                  <td>${escapeHtml(r.density)}</td>
-                  <td>${r.quantity}</td>
-                  <td>Ksh ${Math.round(r.cost_price).toLocaleString()}</td>
-                  <td>Ksh ${Math.round(r.selling_price).toLocaleString()}</td>
-                  <td style="color:${r.profit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(r.profit).toLocaleString()}</td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>`;
-      document.getElementById(totalElId).innerHTML =
-        `Subtotal — Revenue: Ksh ${Math.round(totalRevenue).toLocaleString()} · Cost: Ksh ${Math.round(totalCost).toLocaleString()} · <span style="color:${totalProfit >= 0 ? '#059669' : '#dc2626'};">Profit: Ksh ${Math.round(totalProfit).toLocaleString()}</span>`;
-      return { revenue: totalRevenue, cost: totalCost, profit: totalProfit };
-    }
-
-    async function loadDailyReport() {
-      if (!navigator.onLine) return;
-      const dateStr = document.getElementById('report-date').value;
-      if (!dateStr) return;
-      const { start, end } = dayRangeFor(dateStr);
-
-      // ── Lorry sales profit ──
-      const { data: lorryRows, error: lorryErr } = await supabaseClient.rpc('get_lorry_profit_breakdown', { p_start: start, p_end: end });
-      if (lorryErr) { document.getElementById('report-profit-table').innerHTML = `<div class="empty-state">Error: ${escapeHtml(lorryErr.message)}</div>`; }
-      const lorryTotals = lorryErr ? { revenue: 0, cost: 0, profit: 0 } : renderProfitTable(lorryRows, 'report-profit-table', 'report-profit-total', 'No lorry sales on this date.');
-
-      // ── Store → Shop transfer profit ──
-      const { data: transferRows, error: transferErr } = await supabaseClient.rpc('get_store_transfer_profit_breakdown', { p_start: start, p_end: end });
-      if (transferErr) { document.getElementById('report-transfer-table').innerHTML = `<div class="empty-state">Error: ${escapeHtml(transferErr.message)}</div>`; }
-      const transferTotals = transferErr ? { revenue: 0, cost: 0, profit: 0 } : renderProfitTable(transferRows, 'report-transfer-table', 'report-transfer-total', 'No transfers to the shop on this date.');
-
-      // ── Combined grand total for the whole store ──
-      const grandProfit = lorryTotals.profit + transferTotals.profit;
-      document.getElementById('report-grand-total').innerHTML =
-        `Whole Store Profit (Lorry + Transfers): <span style="color:${grandProfit >= 0 ? '#059669' : '#dc2626'};">Ksh ${Math.round(grandProfit).toLocaleString()}</span>`;
-
-      // ── Returns detail ──
-      const returnsEl = document.getElementById('report-returns-table');
-      const { data: returnRows, error: returnErr } = await supabaseClient.rpc('get_returns_detail', { p_start: start, p_end: end });
-      if (returnErr) { returnsEl.innerHTML = `<div class="empty-state">Error: ${escapeHtml(returnErr.message)}</div>`; }
-      else if (!returnRows || !returnRows.length) {
-        returnsEl.innerHTML = '<div class="empty-state">No returns on this date.</div>';
-        document.getElementById('report-loss-total').textContent = '';
-      } else {
-        let totalDamagedValue = 0;
-        returnsEl.innerHTML = `
-          <table>
-            <thead><tr><th>Time</th><th>Product</th><th>Qty</th><th>Condition</th><th>Cause</th><th>Value</th></tr></thead>
-            <tbody>
-              ${returnRows.map(r => {
-                const time = new Date(r.returned_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-                const isDamaged = r.condition === 'damaged';
-                if (isDamaged) totalDamagedValue += Number(r.value);
-                return `
-                  <tr>
-                    <td style="font-size:0.82rem; white-space:nowrap;">${time}</td>
-                    <td>${escapeHtml(r.product_name)}</td>
-                    <td>${r.quantity}</td>
-                    <td><span class="badge ${isDamaged ? 'low' : 'in_stock'}">${r.condition}</span></td>
-                    <td>${escapeHtml(r.reason)}</td>
-                    <td style="color:${isDamaged ? '#dc2626' : 'inherit'};">Ksh ${Math.round(r.value).toLocaleString()}</td>
-                  </tr>`;
-              }).join('')}
-            </tbody>
-          </table>`;
-        document.getElementById('report-loss-total').textContent =
-          `Damaged Stock Loss: Ksh ${Math.round(totalDamagedValue).toLocaleString()}`;
-      }
-    }
 
     function renderNav() {
       const staffLink = currentStaff.role === 'admin' ? '<a href="staff.html">Staff</a>' : '';
       document.getElementById('nav-tabs').innerHTML = `
-        <a href="store.html" class="active">Store</a>
-        <a href="lorry.html">Lorry</a>
+        <a href="store.html">Store</a>
+        <a href="lorry.html" class="active">Lorry</a>
         ${staffLink}
       `;
-    }
-
-    // ─── STORE INVENTORY ────────────────────────────────────────────────────
-    // Sizes look like "30*4", "72*8", "24*48*2" — a plain text sort gets this
-    // wrong once widths have a different number of digits (e.g. "9" vs "36").
-    // Pull out all the numbers in the size and compare those, in order.
-    function sizeSortKey(p) {
-      const nums = (p.size || '').match(/\d+(\.\d+)?/g);
-      return nums ? nums.map(Number) : [Infinity];
-    }
-
-    function compareBySize(a, b) {
-      const ka = sizeSortKey(a), kb = sizeSortKey(b);
-      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-        const va = ka[i] ?? -Infinity, vb = kb[i] ?? -Infinity;
-        if (va !== vb) return va - vb;
-      }
-      return displayName(a).localeCompare(displayName(b));
-    }
-
-    async function loadStoreProducts() {
-      if (!navigator.onLine) {
-        const cached = cacheGet('store_products');
-        if (cached) { storeProducts = cached.data.sort(compareBySize); renderStoreTable(storeProducts); updateSummary(); populateProductSelect(); }
-        return;
-      }
-      const { data, error } = await supabaseClient
-        .from('store_products').select('*').eq('is_active', true).order('name');
-      if (error) { console.error(error); return; }
-      storeProducts = (data || []).sort(compareBySize);
-      cacheSet('store_products', storeProducts);
-      renderStoreTable(storeProducts);
-      updateSummary();
-      populateProductSelect();
-      updateLowStockBanner();
     }
 
     function displayName(p) {
       return [p.size, p.name, p.density, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
     }
 
-    function renderStoreTable(rows) {
-      const el = document.getElementById('store-table');
-      if (!rows.length) { el.innerHTML = '<div class="empty-state">No products yet. Click "+ Add Product".</div>'; return; }
+    async function loadStoreProducts() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('store_products_for_lorry');
+        if (cached) { storeProducts = cached.data; populateProductSelects(); }
+        return;
+      }
+      const { data, error } = await supabaseClient.from('store_products').select('*').eq('is_active', true).order('name');
+      if (error) { console.error(error); return; }
+      storeProducts = data || [];
+      cacheSet('store_products_for_lorry', storeProducts);
+      populateProductSelects();
+      renderDeliveryChecklist();
+    }
+
+    function populateProductSelects() {
+      const datalist = document.getElementById('issue-product-options');
+      datalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+
+      const returnDatalist = document.getElementById('return-product-options');
+      returnDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+    }
+
+    function findProductByName(typed) {
+      return storeProducts.find(p => displayName(p) === typed);
+    }
+
+    function priceForProduct(productId) {
+      const p = storeProducts.find(sp => String(sp.id) === String(productId));
+      return p ? p.price : '';
+    }
+
+    // ─── SEARCH: resolve typed product name to its id for Load Stock onto Lorry ──
+    document.getElementById('issue-product-search').addEventListener('input', (e) => {
+      const match = findProductByName(e.target.value.trim());
+      document.getElementById('issue-product').value = match ? match.id : '';
+    });
+
+    // ─── SEARCH: resolve typed product name for Record a Return ──
+    document.getElementById('return-product-search').addEventListener('input', (e) => {
+      const match = findProductByName(e.target.value.trim());
+      document.getElementById('return-product').value = match ? match.id : '';
+    });
+
+    async function loadLorryStock() {
+      if (!navigator.onLine) {
+        const cached = cacheGet('lorry_stock');
+        if (cached) { lorryStock = cached.data; renderLorryStock(); renderDeliveryChecklist(); }
+        return;
+      }
+      const { data, error } = await supabaseClient
+        .from('lorry_stock').select('*, store_products(name, size, manufacturer, density, category, cost, price)').gt('quantity', 0);
+      if (error) { console.error(error); return; }
+      lorryStock = data || [];
+      cacheSet('lorry_stock', lorryStock);
+      renderLorryStock();
+      renderDeliveryChecklist();
+    }
+
+    function renderLorryStock() {
+      const el = document.getElementById('lorry-stock-table');
+      if (!lorryStock.length) { el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Density</th><th>Buying Price</th><th>Selling Price</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Density</th><th>Buying Price</th><th>Selling Price</th><th>Qty on Lorry</th></tr></thead>
           <tbody>
-            ${rows.map(p => {
-              const low = p.stock_quantity <= (p.reorder_level ?? 5);
+            ${lorryStock.map(r => {
+              const p = r.store_products || {};
               return `
-                <tr>
+                <tr
+                  style="cursor:pointer;"
+                  title="Tap to tick it in Record Delivery Outcome"
+                  onclick="tickForDelivery('${r.store_product_id}')"
+                >
                   <td><strong>${escapeHtml([p.size, p.name].filter(Boolean).join(' '))}</strong>${p.manufacturer ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.manufacturer)}</div>` : ''}${p.category ? `<div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(p.category)}</div>` : ''}</td>
                   <td>${p.density ? escapeHtml(p.density) : '—'}</td>
                   <td>Ksh ${Number(p.cost || 0).toLocaleString()}</td>
-                  <td>Ksh ${Number(p.price).toLocaleString()}</td>
-                  <td><span class="badge ${low ? 'low' : 'in_stock'}">${p.stock_quantity}</span></td>
-                  <td><button class="secondary" style="padding:5px 8px; font-size:0.78rem;" onclick='editProduct(${JSON.stringify(p.id)})'>Edit</button></td>
+                  <td>Ksh ${Number(p.price || 0).toLocaleString()}</td>
+                  <td><span class="badge in_stock">${r.quantity}</span></td>
                 </tr>`;
             }).join('')}
           </tbody>
         </table>`;
     }
 
-    document.getElementById('store-search').addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      renderStoreTable(storeProducts.filter(p => displayName(p).toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q)));
-    });
-
-    function updateSummary() {
-      document.getElementById('sum-products').textContent = storeProducts.length;
-      const value = storeProducts.reduce((s, p) => s + (Number(p.cost || 0) * Number(p.stock_quantity || 0)), 0);
-      document.getElementById('sum-value').textContent = `Ksh ${Math.round(value).toLocaleString()}`;
-    }
-
-    function updateLowStockBanner() {
-      const banner = document.getElementById('low-stock-banner');
-      const low = storeProducts.filter(p => p.stock_quantity <= (p.reorder_level ?? 5));
-      if (!low.length) { banner.style.display = 'none'; return; }
-      const names = low.slice(0,4).map(p => escapeHtml(displayName(p))).join(', ');
-      const extra = low.length > 4 ? ` and ${low.length-4} more` : '';
-      banner.innerHTML = `⚠️ Low stock in store: ${names}${extra}`;
-      banner.style.display = 'block';
-    }
-
-    // ─── ADD / EDIT PRODUCT ─────────────────────────────────────────────────
-    function openProductModal() {
-      document.getElementById('pm-title').textContent = '+ Add Product';
-      document.getElementById('pm-id').value = '';
-      ['pm-name','pm-size','pm-manufacturer','pm-density','pm-category','pm-stock','pm-reorder','pm-cost','pm-price'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('pm-reorder').value = 5;
-      // New product: no existing stock to add on top of, so just a plain quantity field.
-      document.getElementById('pm-stock-mode-field').style.display = 'none';
-      document.getElementById('pm-stock-label').textContent = 'Stock Quantity';
-      document.getElementById('pm-stock-preview').textContent = '';
-      document.getElementById('pm-error').style.display = 'none';
-      document.getElementById('product-modal').style.display = 'block';
-      document.getElementById('product-modal-overlay').style.display = 'block';
-    }
-
-    function editProduct(id) {
-      const p = storeProducts.find(x => x.id === id);
-      if (!p) return;
-      document.getElementById('pm-title').textContent = 'Edit Product';
-      document.getElementById('pm-id').value = p.id;
-      document.getElementById('pm-name').value = p.name || '';
-      document.getElementById('pm-size').value = p.size || '';
-      document.getElementById('pm-manufacturer').value = p.manufacturer || '';
-      document.getElementById('pm-density').value = p.density || '';
-      document.getElementById('pm-category').value = p.category || '';
-      document.getElementById('pm-reorder').value = p.reorder_level ?? 5;
-      document.getElementById('pm-cost').value = p.cost ?? '';
-      document.getElementById('pm-price').value = p.price ?? '';
-      // Editing: default to "Add" mode with a blank field, so typing a number
-      // adds to existing stock instead of silently overwriting it.
-      document.getElementById('pm-stock-mode-field').style.display = 'block';
-      document.getElementById('pm-stock-mode').value = 'add';
-      document.getElementById('pm-stock').value = '';
-      updateStoreStockLabel();
-      document.getElementById('pm-error').style.display = 'none';
-      document.getElementById('product-modal').style.display = 'block';
-      document.getElementById('product-modal-overlay').style.display = 'block';
-    }
-
-    function updateStoreStockLabel() {
-      const mode = document.getElementById('pm-stock-mode').value;
-      document.getElementById('pm-stock-label').textContent =
-        mode === 'add' ? 'How many units are being added?' : 'What is the correct total stock count?';
-      updateStoreStockPreview();
-    }
-
-    function updateStoreStockPreview() {
-      const id = document.getElementById('pm-id').value;
-      const previewEl = document.getElementById('pm-stock-preview');
-      if (!id) { previewEl.textContent = ''; return; } // new product, no preview needed
-      const p = storeProducts.find(x => x.id === id);
-      const mode = document.getElementById('pm-stock-mode').value;
-      const val = parseFloat(document.getElementById('pm-stock').value);
-      if (!p || isNaN(val) || val < 0) { previewEl.textContent = ''; return; }
-      if (mode === 'add') {
-        previewEl.textContent = `New total: ${p.stock_quantity} + ${val} = ${p.stock_quantity + val}`;
-      } else {
-        previewEl.textContent = `Stock will be set to exactly ${val} (was ${p.stock_quantity}).`;
-      }
-    }
-
-    document.getElementById('pm-stock').addEventListener('input', updateStoreStockPreview);
-
-    function closeProductModal() {
-      document.getElementById('product-modal').style.display = 'none';
-      document.getElementById('product-modal-overlay').style.display = 'none';
-    }
-
-    async function saveProduct() {
-      const errorEl = document.getElementById('pm-error');
-      errorEl.style.display = 'none';
-
-      const id = document.getElementById('pm-id').value;
-      const name = document.getElementById('pm-name').value.trim();
-      const size = document.getElementById('pm-size').value.trim();
-      const manufacturer = document.getElementById('pm-manufacturer').value.trim();
-      const density = document.getElementById('pm-density').value.trim();
-      const category = document.getElementById('pm-category').value.trim();
-      const enteredStock = parseFloat(document.getElementById('pm-stock').value);
-      const reorder_level = parseFloat(document.getElementById('pm-reorder').value);
-      const cost = parseFloat(document.getElementById('pm-cost').value);
-      const price = parseFloat(document.getElementById('pm-price').value);
-
-      if (!name || isNaN(price)) {
-        errorEl.textContent = 'Name and selling price are required.';
-        errorEl.style.display = 'block';
+    // ─── CHECKLIST: everything currently on the lorry, tickable for batch delivery ──
+    function renderDeliveryChecklist() {
+      const el = document.getElementById('delivery-checklist');
+      if (!el) return;
+      if (!lorryStock.length) {
+        el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>';
         return;
       }
-
-      // "Add" mode always adds on top of the live current stock — it never
-      // overwrites it, even if the number typed was meant additively.
-      let stock_quantity;
-      if (id) {
-        const existing = storeProducts.find(p => p.id === id);
-        const mode = document.getElementById('pm-stock-mode').value;
-        const val = isNaN(enteredStock) ? 0 : enteredStock;
-        stock_quantity = mode === 'add' ? (existing ? existing.stock_quantity : 0) + val : val;
-      } else {
-        stock_quantity = isNaN(enteredStock) ? 0 : enteredStock;
-      }
-
-      const btn = document.getElementById('pm-save-btn');
-      btn.disabled = true; btn.textContent = 'Saving...';
-
-      const payload = {
-        name, size: size || null, manufacturer: manufacturer || null, density: density || null, category: category || null,
-        stock_quantity,
-        reorder_level: isNaN(reorder_level) ? 5 : reorder_level,
-        cost: isNaN(cost) ? 0 : cost,
-        price
-      };
-
-      const { error } = id
-        ? await supabaseClient.from('store_products').update(payload).eq('id', id)
-        : await supabaseClient.from('store_products').insert({ ...payload, is_active: true });
-
-      btn.disabled = false; btn.textContent = 'Save Product';
-
-      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
-
-      closeProductModal();
-      await loadStoreProducts();
-    }
-
-    // ─── TRANSFER TO SHOP ───────────────────────────────────────────────────
-    function populateProductSelect() {
-      const options = '<option value="">— choose a product —</option>' +
-        storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-cost="${p.cost||0}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
-      document.getElementById('product-select').innerHTML = options;
-      document.getElementById('restock-product-select').innerHTML = options;
-    }
-
-    function addTransferItem() {
-      const select = document.getElementById('product-select');
-      const productId = select.value;
-      const qty = parseFloat(document.getElementById('transfer-qty').value);
-      const errorEl = document.getElementById('transfer-error');
-      errorEl.style.display = 'none';
-
-      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
-      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
-
-      const product = storeProducts.find(p => p.id === productId);
-      if (!product) return;
-      const existing = transferItems.find(i => i.store_product_id === productId);
-      const alreadyQty = existing ? existing.quantity : 0;
-      if (alreadyQty + qty > product.stock_quantity) {
-        errorEl.textContent = `Store only has ${product.stock_quantity} unit(s) of "${displayName(product)}". You've already added ${alreadyQty}.`;
-        errorEl.style.display = 'block'; return;
-      }
-
-      if (existing) {
-        existing.quantity += qty;
-      } else {
-        transferItems.push({
-          store_product_id: productId,
-          product_name: displayName(product),
-          quantity: qty,
-          unit_cost: product.cost || 0,
-          unit_price: product.price,
-          store_qty: product.stock_quantity
-        });
-      }
-      select.value = '';
-      document.getElementById('transfer-qty').value = '';
-      renderTransferItems();
-    }
-
-    function renderTransferItems() {
-      const box = document.getElementById('transfer-items-box');
-      if (!transferItems.length) { box.innerHTML = '<div class="empty-transfer">No items added yet.</div>'; return; }
-      box.innerHTML = transferItems.map((item, idx) => `
-        <div class="transfer-item-row">
-          <div style="flex:1;">
-            <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
-            <div style="font-size:0.78rem; color:var(--muted);">Store stock: ${item.store_qty}</div>
-          </div>
-          <input class="transfer-qty-input" type="number" min="0.01" step="any" value="${item.quantity}" onchange="updateItemQty(${idx}, this.value)">
-          <button class="secondary danger" style="padding:4px 8px; font-size:0.78rem; margin:0;" onclick="removeTransferItem(${idx})">✕</button>
-        </div>`).join('');
-    }
-
-    function updateItemQty(idx, rawVal) {
-      const errorEl = document.getElementById('transfer-error');
-      errorEl.style.display = 'none';
-      const qty = parseFloat(rawVal);
-      if (!qty || qty <= 0) { removeTransferItem(idx); return; }
-      if (qty > transferItems[idx].store_qty) {
-        errorEl.textContent = `Store only has ${transferItems[idx].store_qty} unit(s) of "${transferItems[idx].product_name}".`;
-        errorEl.style.display = 'block';
-        return;
-      }
-      transferItems[idx].quantity = qty;
-    }
-
-    function removeTransferItem(idx) { transferItems.splice(idx, 1); renderTransferItems(); }
-
-    function clearTransfer() {
-      transferItems = [];
-      document.getElementById('transfer-notes').value = '';
-      document.getElementById('transfer-error').style.display = 'none';
-      renderTransferItems();
-    }
-
-    async function submitTransfer() {
-      const errorEl = document.getElementById('transfer-error');
-      errorEl.style.display = 'none';
-
-      if (!transferItems.length) { errorEl.textContent = 'Add at least one item before sending.'; errorEl.style.display = 'block'; return; }
-
-      const notes = document.getElementById('transfer-notes').value.trim();
-      const btn = document.getElementById('submit-transfer-btn');
-      btn.disabled = true; btn.textContent = 'Sending...';
-
-      const { error } = await supabaseClient.rpc('record_transfer', {
-        p_staff_id: currentStaff.id,
-        p_notes: notes || null,
-        p_items: transferItems.map(i => ({
-          store_product_id: i.store_product_id, product_name: i.product_name,
-          quantity: i.quantity, unit_cost: i.unit_cost, unit_price: i.unit_price
-        }))
-      });
-
-      btn.disabled = false; btn.textContent = '✅ Send to Shop';
-
-      if (error) { errorEl.textContent = 'Transfer failed: ' + error.message; errorEl.style.display = 'block'; return; }
-
-      clearTransfer();
-      await Promise.all([loadStoreProducts(), loadHistory()]);
-      alert(`✅ Sent to shop! Remember to mark it as paid in the shop app (Dashboard → Incoming Transfers) once payment is received.`);
-    }
-
-    // ─── RESTOCK STORE (new stock arriving from a supplier) ────────────────
-    let restockItems = [];
-
-    function addRestockItem() {
-      const select = document.getElementById('restock-product-select');
-      const productId = select.value;
-      const qty = parseFloat(document.getElementById('restock-qty').value);
-      const costRaw = document.getElementById('restock-cost').value;
-      const errorEl = document.getElementById('restock-error');
-      errorEl.style.display = 'none';
-
-      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
-      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
-
-      const product = storeProducts.find(p => p.id === productId);
-      if (!product) return;
-      const currentCost = product.cost || 0;
-      const unit_cost = costRaw !== '' ? parseFloat(costRaw) : currentCost;
-
-      const existing = restockItems.find(i => i.store_product_id === productId);
-      if (existing) {
-        existing.quantity += qty;
-        existing.unit_cost = unit_cost;
-      } else {
-        restockItems.push({
-          store_product_id: productId,
-          product_name: displayName(product),
-          quantity: qty,
-          unit_cost,
-          current_cost: currentCost,
-          current_stock: product.stock_quantity
-        });
-      }
-      select.value = '';
-      document.getElementById('restock-qty').value = '';
-      document.getElementById('restock-cost').value = '';
-      renderRestockItems();
-    }
-
-    function renderRestockItems() {
-      const box = document.getElementById('restock-items-box');
-      if (!restockItems.length) { box.innerHTML = '<div class="empty-transfer">No items added yet.</div>'; return; }
-      box.innerHTML = restockItems.map((item, idx) => {
-        const costChanged = Number(item.unit_cost) !== Number(item.current_cost);
+      el.innerHTML = lorryStock.map(r => {
+        const pid = r.store_product_id;
+        const name = displayName(r.store_products || {});
+        const maxQty = r.quantity;
+        const price = priceForProduct(pid);
         return `
-        <div class="transfer-item-row">
-          <div style="flex:1;">
-            <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
-            <div style="font-size:0.78rem; color:var(--muted);">
-              Current stock: ${item.current_stock} · Buying price: Ksh ${Number(item.unit_cost).toLocaleString()}${costChanged ? ` (was Ksh ${Number(item.current_cost).toLocaleString()})` : ''}
+          <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
+            <input type="checkbox" id="deliver-check-${pid}" style="width:18px; height:18px; flex-shrink:0;">
+            <div style="flex:1; min-width:0;">
+              <label for="deliver-check-${pid}" style="font-weight:600; cursor:pointer;">${escapeHtml(name)}</label>
+              <div style="color:var(--muted); font-size:0.75rem;">${maxQty} on lorry</div>
             </div>
+            <input type="number" id="deliver-qty-${pid}" value="1" min="0.01" max="${maxQty}" step="any" style="width:64px;" placeholder="Qty">
+            <input type="number" id="deliver-price-${pid}" value="${price}" style="width:84px;" placeholder="Price">
           </div>
-          <input class="transfer-qty-input" type="number" min="0.01" step="any" value="${item.quantity}" onchange="updateRestockItemQty(${idx}, this.value)">
-          <button class="secondary danger" style="padding:4px 8px; font-size:0.78rem; margin:0;" onclick="removeRestockItem(${idx})">✕</button>
-        </div>`;
+        `;
       }).join('');
     }
 
-    function updateRestockItemQty(idx, rawVal) {
-      const qty = parseFloat(rawVal);
-      if (!qty || qty <= 0) { removeRestockItem(idx); return; }
-      restockItems[idx].quantity = qty;
+    // ─── TAP A LORRY-STOCK ROW: tick + focus it in the delivery checklist ──
+    function tickForDelivery(productId) {
+      const checkbox = document.getElementById(`deliver-check-${productId}`);
+      if (!checkbox) return;
+
+      checkbox.checked = true;
+      checkbox.closest('div').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const qtyInput = document.getElementById(`deliver-qty-${productId}`);
+      if (qtyInput) { qtyInput.focus(); qtyInput.select(); }
     }
 
-    function removeRestockItem(idx) { restockItems.splice(idx, 1); renderRestockItems(); }
+    // ─── ISSUE STOCK TO LORRY (needs live connection — touches store stock) ──
+    async function issueStock() {
+      const errorEl = document.getElementById('issue-error');
+      errorEl.style.display = 'none';
+      const productId = document.getElementById('issue-product').value;
+      const qty = parseFloat(document.getElementById('issue-qty').value);
+      const notes = document.getElementById('issue-notes').value.trim();
 
-    function clearRestock() {
-      restockItems = [];
-      document.getElementById('restock-supplier').value = '';
-      document.getElementById('restock-notes').value = '';
-      document.getElementById('restock-error').style.display = 'none';
-      renderRestockItems();
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Loading stock onto the lorry needs internet (it checks live store stock).'; errorEl.style.display = 'block'; return; }
+
+      const { error } = await supabaseClient.rpc('issue_to_lorry', {
+        p_store_product_id: productId, p_quantity: qty, p_staff_id: currentStaff.id, p_notes: notes || null
+      });
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      document.getElementById('issue-product').value = '';
+      document.getElementById('issue-product-search').value = '';
+      document.getElementById('issue-qty').value = '';
+      document.getElementById('issue-notes').value = '';
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      alert('✅ Stock loaded onto the lorry.');
     }
 
-    async function submitRestock() {
-      const errorEl = document.getElementById('restock-error');
+    // ─── DELIVERY OUTCOME: record everything ticked as delivered, in one submit ──
+    async function recordDeliveredBatch() {
+      const errorEl = document.getElementById('delivery-error');
       errorEl.style.display = 'none';
 
-      if (!restockItems.length) { errorEl.textContent = 'Add at least one item before saving.'; errorEl.style.display = 'block'; return; }
+      const paymentMethod = document.getElementById('delivery-payment').value;
 
-      const supplier = document.getElementById('restock-supplier').value.trim();
-      const notes = document.getElementById('restock-notes').value.trim();
-      const btn = document.getElementById('submit-restock-btn');
-      btn.disabled = true; btn.textContent = 'Saving...';
+      const toDeliver = [];
+      for (const r of lorryStock) {
+        const pid = r.store_product_id;
+        const checkbox = document.getElementById(`deliver-check-${pid}`);
+        if (!checkbox || !checkbox.checked) continue;
 
-      const { error } = await supabaseClient.rpc('record_restock', {
-        p_staff_id: currentStaff.id,
-        p_supplier: supplier || null,
-        p_notes: notes || null,
-        p_items: restockItems.map(i => ({
-          store_product_id: i.store_product_id,
-          product_name: i.product_name,
-          quantity: i.quantity,
-          unit_cost: i.unit_cost,
-          update_cost: Number(i.unit_cost) !== Number(i.current_cost)
-        }))
-      });
+        const name = displayName(r.store_products || {});
+        const qty = parseFloat(document.getElementById(`deliver-qty-${pid}`).value);
+        const unitPrice = parseFloat(document.getElementById(`deliver-price-${pid}`).value);
 
-      btn.disabled = false; btn.textContent = '📥 Add to Store';
+        if (!qty || qty <= 0) {
+          errorEl.textContent = `Enter a valid quantity for ${name}.`;
+          errorEl.style.display = 'block';
+          return;
+        }
+        if (qty > r.quantity) {
+          errorEl.textContent = `Only ${r.quantity} of ${name} left on the lorry.`;
+          errorEl.style.display = 'block';
+          return;
+        }
+        if (isNaN(unitPrice)) {
+          errorEl.textContent = `Enter a valid price for ${name}.`;
+          errorEl.style.display = 'block';
+          return;
+        }
 
-      if (error) { errorEl.textContent = 'Restock failed: ' + error.message; errorEl.style.display = 'block'; return; }
-
-      clearRestock();
-      await Promise.all([loadStoreProducts(), loadRestockHistory()]);
-      alert('✅ Stock added to store!');
-    }
-
-    async function loadRestockHistory() {
-      const { data, error } = await supabaseClient
-        .from('restocks')
-        .select('*, staff(full_name), restock_items(product_name, quantity, unit_cost)')
-        .order('created_at', { ascending: false })
-        .limit(30);
-
-      const el = document.getElementById('restock-history-table');
-      if (error) { el.innerHTML = '<div class="empty-state">Failed to load restock history.</div>'; return; }
-      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No restocks yet.</div>'; return; }
-
-      el.innerHTML = `
-        <table>
-          <thead><tr><th>Date</th><th>Items</th><th>Supplier</th><th>Buying Price</th></tr></thead>
-          <tbody>
-            ${data.map(r => {
-              const dateStr = new Date(r.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
-              const items = (r.restock_items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
-              return `
-                <tr>
-                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
-                  <td style="font-size:0.82rem;">${items || '—'}</td>
-                  <td style="font-size:0.82rem;">${escapeHtml(r.supplier || '—')}</td>
-                  <td>Ksh ${Number(r.total_cost || 0).toLocaleString()}</td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>`;
-    }
-
-    // ─── TRANSFER HISTORY ───────────────────────────────────────────────────
-    async function loadHistory() {
-      const { data, error } = await supabaseClient
-        .from('stock_transfers')
-        .select('*, staff(full_name), stock_transfer_items(product_name, quantity)')
-        .order('created_at', { ascending: false })
-        .limit(30);
-
-      if (error) { document.getElementById('history-table').innerHTML = '<div class="empty-state">Failed to load history.</div>'; return; }
-
-      // Pull real payment status from the shop app's incoming_transfers table
-      // (matched by transfer_ref = this transfer's id) — that's the source of truth
-      // since payment is confirmed on the shop side.
-      const ids = (data || []).map(t => t.id.toString());
-      let paymentMap = {};
-      if (ids.length) {
-        const { data: incoming } = await supabaseClient
-          .from('incoming_transfers').select('transfer_ref, payment_status, amount_paid').in('transfer_ref', ids);
-        (incoming || []).forEach(i => { paymentMap[i.transfer_ref] = i; });
+        toDeliver.push({ productId: pid, name, qty, unitPrice });
       }
 
-      const unpaidCount = (data || []).filter(t => (paymentMap[t.id]?.payment_status || 'unpaid') !== 'paid').length;
-      document.getElementById('sum-unpaid').textContent = unpaidCount;
+      if (!toDeliver.length) {
+        errorEl.textContent = 'Tick at least one product that was delivered.';
+        errorEl.style.display = 'block';
+        return;
+      }
 
-      const el = document.getElementById('history-table');
-      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No transfers yet.</div>'; return; }
+      const btn = document.getElementById('deliver-batch-btn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      for (const item of toDeliver) {
+        const saleData = {
+          store_product_id: item.productId, product_name: item.name, quantity: item.qty, unit_price: item.unitPrice,
+          customer_name: null, customer_phone: null,
+          payment_method: paymentMethod, staff_id: currentStaff.id
+        };
+
+        if (navigator.onLine) {
+          const { error } = await supabaseClient.rpc('record_lorry_sale', {
+            p_store_product_id: item.productId, p_quantity: item.qty, p_unit_price: item.unitPrice,
+            p_customer_name: null, p_customer_phone: null,
+            p_payment_method: paymentMethod, p_staff_id: currentStaff.id, p_synced: true
+          });
+          if (error) {
+            errorEl.textContent = `Error recording ${item.name}: ${error.message}`;
+            errorEl.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = '✅ Record Delivered Items';
+            return;
+          }
+        } else {
+          await queueLorrySaleOffline(saleData);
+          const row = lorryStock.find(r => r.store_product_id === item.productId);
+          if (row) row.quantity = Math.max(0, row.quantity - item.qty);
+        }
+
+        recordSaleInTodaySummary(item.name, item.qty, item.unitPrice, paymentMethod);
+      }
+
+      if (navigator.onLine) {
+        await loadLorryStock();
+      } else {
+        renderLorryStock();
+        renderDeliveryChecklist();
+        cacheSet('lorry_stock', lorryStock);
+        updateLorrySyncBadge((await getPendingLorrySales()).length);
+      }
+
+      btn.disabled = false;
+      btn.textContent = '✅ Record Delivered Items';
+
+      alert(`✅ Recorded ${toDeliver.length} item(s) as delivered.`);
+    }
+
+    // ─── TODAY'S LORRY SALES SUMMARY (local, per device, resets each day) ──
+    function todayKey() {
+      return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    function getTodaySummary() {
+      let stored;
+      try {
+        stored = JSON.parse(localStorage.getItem(LORRY_SALES_SUMMARY_KEY));
+      } catch (e) {
+        stored = null;
+      }
+      if (!stored || stored.date !== todayKey()) {
+        stored = { date: todayKey(), deliveries: [] };
+        localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(stored));
+      }
+      return stored;
+    }
+
+    function recordSaleInTodaySummary(productName, qty, unitPrice, paymentMethod) {
+      const summary = getTodaySummary();
+      summary.deliveries.push({
+        name: productName,
+        qty,
+        unitPrice,
+        total: qty * unitPrice,
+        paymentMethod,
+        time: new Date().toISOString()
+      });
+      localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(summary));
+      renderSalesSummary();
+    }
+
+    function renderSalesSummary() {
+      const el = document.getElementById('lorry-sales-summary');
+      if (!el) return;
+
+      const summary = getTodaySummary();
+      const deliveries = summary.deliveries;
+
+      if (!deliveries.length) {
+        el.innerHTML = '<div class="empty-state">No deliveries recorded yet today.</div>';
+        return;
+      }
+
+      const totalValue = deliveries.reduce((sum, d) => sum + d.total, 0);
+      const totalItems = deliveries.reduce((sum, d) => sum + d.qty, 0);
 
       el.innerHTML = `
-        <table>
-          <thead><tr><th>Date</th><th>Items</th><th>Value</th><th>Payment</th></tr></thead>
-          <tbody>
-            ${data.map(t => {
-              const dateStr = new Date(t.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
-              const items = (t.stock_transfer_items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
-              const status = paymentMap[t.id]?.payment_status || 'unpaid';
-              const payClass = status === 'paid' ? 'pay-paid' : status === 'partial' ? 'pay-partial' : 'pay-unpaid';
-              return `
-                <tr>
-                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
-                  <td style="font-size:0.82rem;">${items || '—'}</td>
-                  <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
-                  <td><span class="pay-badge ${payClass}">${status}</span></td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>`;
+        <div style="
+          display:flex;
+          justify-content:space-between;
+          align-items:baseline;
+          margin-bottom:10px;
+        ">
+          <span style="font-size:0.85rem; color:var(--muted);">
+            ${deliveries.length} delivery${deliveries.length === 1 ? '' : 'ies'} · ${totalItems} item(s)
+          </span>
+          <span style="font-size:1.3rem; font-weight:800;">
+            Ksh ${totalValue.toLocaleString()}
+          </span>
+        </div>
+        <div style="max-height:220px; overflow-y:auto;">
+          ${deliveries.slice().reverse().map(d => `
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:8px;
+              padding:6px 0;
+              border-bottom:1px solid var(--border);
+              font-size:0.85rem;
+            ">
+              <div>
+                <strong>${escapeHtml(d.name)}</strong>
+                <div style="color:var(--muted); font-size:0.75rem;">
+                  ${d.qty} × Ksh ${d.unitPrice.toLocaleString()} · ${escapeHtml(d.paymentMethod)}
+                </div>
+              </div>
+              <span style="font-weight:600;">Ksh ${d.total.toLocaleString()}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
+    async function recordReturn() {
+      const errorEl = document.getElementById('return-error');
+      errorEl.style.display = 'none';
+      const productId = document.getElementById('return-product').value;
+      const qty = parseFloat(document.getElementById('return-qty').value);
+      const condition = document.getElementById('return-condition').value;
+      const reason = document.getElementById('return-reason').value.trim();
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+      if (!navigator.onLine) { errorEl.textContent = 'Recording a return needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
+
+      const { error } = await supabaseClient.rpc('record_lorry_return', {
+        p_store_product_id: productId, p_quantity: qty, p_reason: reason || null, p_staff_id: currentStaff.id, p_condition: condition
+      });
+      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      document.getElementById('return-product').value = '';
+      document.getElementById('return-product-search').value = '';
+      document.getElementById('return-qty').value = '';
+      document.getElementById('return-condition').value = 'good';
+      document.getElementById('return-reason').value = '';
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — removed from lorry, not added back to store stock.');
     }
 
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
