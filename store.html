@@ -63,8 +63,37 @@
         </div>
       </div>
 
-      <!-- RIGHT: Transfer to shop + history -->
+      <!-- RIGHT: Restock + Transfer to shop + history -->
       <div>
+        <div class="card" style="margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">📥 Restock Store</h3>
+            <button class="secondary" onclick="clearRestock()" style="font-size:0.8rem; padding:5px 10px;">Clear</button>
+          </div>
+          <div class="field">
+            <label>Select product</label>
+            <select id="restock-product-select"><option value="">— choose a product —</option></select>
+          </div>
+          <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+            <div class="field" style="flex:1; margin:0; min-width:100px;">
+              <label>Quantity received</label>
+              <input type="number" id="restock-qty" min="0.01" step="any" placeholder="e.g. 20">
+            </div>
+            <div class="field" style="flex:1; margin:0; min-width:100px;">
+              <label>Cost per unit (Ksh)</label>
+              <input type="number" id="restock-cost" min="0" step="any" placeholder="current cost">
+            </div>
+            <button onclick="addRestockItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
+          </div>
+          <div class="transfer-items-box" id="restock-items-box"><div class="empty-transfer">No items added yet.</div></div>
+          <div class="grid grid-2">
+            <div class="field"><label>Supplier (optional)</label><input type="text" id="restock-supplier" placeholder="e.g. Ndovu Mattresses Ltd"></div>
+            <div class="field"><label>Notes (optional)</label><input type="text" id="restock-notes" placeholder="e.g. Weekly delivery"></div>
+          </div>
+          <button onclick="submitRestock()" id="submit-restock-btn" style="width:100%; margin-top:4px;">📥 Add to Store</button>
+          <p class="error-text" id="restock-error" style="display:none;"></p>
+        </div>
+
         <div class="card" style="margin-bottom:18px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <h3 style="margin:0;">🚚 Transfer to Shop</h3>
@@ -87,9 +116,14 @@
           <p class="error-text" id="transfer-error" style="display:none;"></p>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">📋 Transfer History</h3>
           <div id="history-table"><div class="empty-state">Loading...</div></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">🧾 Restock History</h3>
+          <div id="restock-history-table"><div class="empty-state">Loading...</div></div>
         </div>
       </div>
     </div>
@@ -175,7 +209,7 @@
       if (!currentStaff) return;
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
-      await Promise.all([loadStoreProducts(), loadHistory()]);
+      await Promise.all([loadStoreProducts(), loadHistory(), loadRestockHistory()]);
       if (currentStaff.role === 'admin') {
         document.getElementById('report-card').style.display = '';
         document.getElementById('report-date').value = new Date().toISOString().slice(0, 10);
@@ -507,9 +541,10 @@
 
     // ─── TRANSFER TO SHOP ───────────────────────────────────────────────────
     function populateProductSelect() {
-      document.getElementById('product-select').innerHTML =
-        '<option value="">— choose a product —</option>' +
+      const options = '<option value="">— choose a product —</option>' +
         storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-cost="${p.cost||0}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
+      document.getElementById('product-select').innerHTML = options;
+      document.getElementById('restock-product-select').innerHTML = options;
     }
 
     function addTransferItem() {
@@ -610,6 +645,143 @@
       clearTransfer();
       await Promise.all([loadStoreProducts(), loadHistory()]);
       alert(`✅ Sent to shop! Remember to mark it as paid in the shop app (Dashboard → Incoming Transfers) once payment is received.`);
+    }
+
+    // ─── RESTOCK STORE (new stock arriving from a supplier) ────────────────
+    let restockItems = [];
+
+    function addRestockItem() {
+      const select = document.getElementById('restock-product-select');
+      const productId = select.value;
+      const qty = parseFloat(document.getElementById('restock-qty').value);
+      const costRaw = document.getElementById('restock-cost').value;
+      const errorEl = document.getElementById('restock-error');
+      errorEl.style.display = 'none';
+
+      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
+      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
+
+      const product = storeProducts.find(p => p.id === productId);
+      if (!product) return;
+      const currentCost = product.cost || 0;
+      const unit_cost = costRaw !== '' ? parseFloat(costRaw) : currentCost;
+
+      const existing = restockItems.find(i => i.store_product_id === productId);
+      if (existing) {
+        existing.quantity += qty;
+        existing.unit_cost = unit_cost;
+      } else {
+        restockItems.push({
+          store_product_id: productId,
+          product_name: displayName(product),
+          quantity: qty,
+          unit_cost,
+          current_cost: currentCost,
+          current_stock: product.stock_quantity
+        });
+      }
+      select.value = '';
+      document.getElementById('restock-qty').value = '';
+      document.getElementById('restock-cost').value = '';
+      renderRestockItems();
+    }
+
+    function renderRestockItems() {
+      const box = document.getElementById('restock-items-box');
+      if (!restockItems.length) { box.innerHTML = '<div class="empty-transfer">No items added yet.</div>'; return; }
+      box.innerHTML = restockItems.map((item, idx) => {
+        const costChanged = Number(item.unit_cost) !== Number(item.current_cost);
+        return `
+        <div class="transfer-item-row">
+          <div style="flex:1;">
+            <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
+            <div style="font-size:0.78rem; color:var(--muted);">
+              Current stock: ${item.current_stock} · Cost: Ksh ${Number(item.unit_cost).toLocaleString()}${costChanged ? ` (was Ksh ${Number(item.current_cost).toLocaleString()})` : ''}
+            </div>
+          </div>
+          <input class="transfer-qty-input" type="number" min="0.01" step="any" value="${item.quantity}" onchange="updateRestockItemQty(${idx}, this.value)">
+          <button class="secondary danger" style="padding:4px 8px; font-size:0.78rem; margin:0;" onclick="removeRestockItem(${idx})">✕</button>
+        </div>`;
+      }).join('');
+    }
+
+    function updateRestockItemQty(idx, rawVal) {
+      const qty = parseFloat(rawVal);
+      if (!qty || qty <= 0) { removeRestockItem(idx); return; }
+      restockItems[idx].quantity = qty;
+    }
+
+    function removeRestockItem(idx) { restockItems.splice(idx, 1); renderRestockItems(); }
+
+    function clearRestock() {
+      restockItems = [];
+      document.getElementById('restock-supplier').value = '';
+      document.getElementById('restock-notes').value = '';
+      document.getElementById('restock-error').style.display = 'none';
+      renderRestockItems();
+    }
+
+    async function submitRestock() {
+      const errorEl = document.getElementById('restock-error');
+      errorEl.style.display = 'none';
+
+      if (!restockItems.length) { errorEl.textContent = 'Add at least one item before saving.'; errorEl.style.display = 'block'; return; }
+
+      const supplier = document.getElementById('restock-supplier').value.trim();
+      const notes = document.getElementById('restock-notes').value.trim();
+      const btn = document.getElementById('submit-restock-btn');
+      btn.disabled = true; btn.textContent = 'Saving...';
+
+      const { error } = await supabaseClient.rpc('record_restock', {
+        p_staff_id: currentStaff.id,
+        p_supplier: supplier || null,
+        p_notes: notes || null,
+        p_items: restockItems.map(i => ({
+          store_product_id: i.store_product_id,
+          product_name: i.product_name,
+          quantity: i.quantity,
+          unit_cost: i.unit_cost,
+          update_cost: Number(i.unit_cost) !== Number(i.current_cost)
+        }))
+      });
+
+      btn.disabled = false; btn.textContent = '📥 Add to Store';
+
+      if (error) { errorEl.textContent = 'Restock failed: ' + error.message; errorEl.style.display = 'block'; return; }
+
+      clearRestock();
+      await Promise.all([loadStoreProducts(), loadRestockHistory()]);
+      alert('✅ Stock added to store!');
+    }
+
+    async function loadRestockHistory() {
+      const { data, error } = await supabaseClient
+        .from('restocks')
+        .select('*, staff(full_name), restock_items(product_name, quantity, unit_cost)')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      const el = document.getElementById('restock-history-table');
+      if (error) { el.innerHTML = '<div class="empty-state">Failed to load restock history.</div>'; return; }
+      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No restocks yet.</div>'; return; }
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Items</th><th>Supplier</th><th>Cost</th></tr></thead>
+          <tbody>
+            ${data.map(r => {
+              const dateStr = new Date(r.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+              const items = (r.restock_items || []).map(i => `${i.quantity} × ${escapeHtml(i.product_name)}`).join('<br>');
+              return `
+                <tr>
+                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
+                  <td style="font-size:0.82rem;">${items || '—'}</td>
+                  <td style="font-size:0.82rem;">${escapeHtml(r.supplier || '—')}</td>
+                  <td>Ksh ${Number(r.total_cost || 0).toLocaleString()}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
     }
 
     // ─── TRANSFER HISTORY ───────────────────────────────────────────────────
