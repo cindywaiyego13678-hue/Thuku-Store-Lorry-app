@@ -30,7 +30,9 @@
           <h3 style="margin-top:0;">📦 Load Stock onto Lorry</h3>
           <div class="field">
             <label>Product</label>
-            <select id="issue-product"><option value="">— choose a product —</option></select>
+            <input type="text" id="issue-product-search" list="issue-product-options" placeholder="Type to search product..." autocomplete="off">
+            <input type="hidden" id="issue-product">
+            <datalist id="issue-product-options"></datalist>
           </div>
           <div class="field"><label>Quantity</label><input type="number" id="issue-qty" min="0.01" step="any" placeholder="e.g. 10"></div>
           <div class="field"><label>Notes (optional)</label><input type="text" id="issue-notes" placeholder="e.g. Morning route — Kasarani"></div>
@@ -38,9 +40,15 @@
           <p class="error-text" id="issue-error" style="display:none;"></p>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">Current Lorry Stock</h3>
+          <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Tap a product to record its delivery outcome — no need to search the dropdown.</p>
           <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top:0;">🧾 Today's Lorry Sales</h3>
+          <div id="lorry-sales-summary"></div>
         </div>
       </div>
 
@@ -96,6 +104,8 @@
     let lorryStock = [];
     let storeProducts = [];
 
+    const LORRY_SALES_SUMMARY_KEY = 'lorry_sales_summary_v1';
+
     (async () => {
       currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
       if (!currentStaff) return;
@@ -106,6 +116,7 @@
         document.getElementById('issue-card').style.display = 'none';
       }
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
+      renderSalesSummary();
     })();
 
     function renderNav() {
@@ -136,10 +147,20 @@
 
     function populateProductSelects() {
       const opts = storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
-      ['issue-product','delivery-product','return-product'].forEach(id => {
+      ['delivery-product','return-product'].forEach(id => {
         document.getElementById(id).innerHTML = '<option value="">— choose a product —</option>' + opts;
       });
+
+      const datalist = document.getElementById('issue-product-options');
+      datalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
     }
+
+    // ─── SEARCH: resolve typed product name to its id for Load Stock onto Lorry ──
+    document.getElementById('issue-product-search').addEventListener('input', (e) => {
+      const typed = e.target.value.trim();
+      const match = storeProducts.find(p => displayName(p) === typed);
+      document.getElementById('issue-product').value = match ? match.id : '';
+    });
 
     document.getElementById('delivery-product').addEventListener('change', (e) => {
       const opt = e.target.options[e.target.selectedIndex];
@@ -169,10 +190,34 @@
           <thead><tr><th>Product</th><th>Qty on Lorry</th></tr></thead>
           <tbody>
             ${lorryStock.map(r => `
-              <tr><td>${escapeHtml(displayName(r.store_products || {}))}</td><td><span class="badge in_stock">${r.quantity}</span></td></tr>
+              <tr
+                style="cursor:pointer;"
+                title="Tap to fill Record Delivery Outcome"
+                onclick="fillDeliveryProduct('${r.store_product_id}')"
+              >
+                <td>${escapeHtml(displayName(r.store_products || {}))}</td>
+                <td><span class="badge in_stock">${r.quantity}</span></td>
+              </tr>
             `).join('')}
           </tbody>
         </table>`;
+    }
+
+    // ─── TAP A LORRY-STOCK ROW: auto-fill the delivery form ──
+    function fillDeliveryProduct(productId) {
+      const select = document.getElementById('delivery-product');
+      select.value = productId;
+      select.dispatchEvent(new Event('change'));
+
+      const qtyInput = document.getElementById('delivery-qty');
+      if (!qtyInput.value) qtyInput.value = 1;
+
+      document.getElementById('delivery-product')
+        .closest('.card')
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      qtyInput.focus();
+      qtyInput.select();
     }
 
     // ─── ISSUE STOCK TO LORRY (needs live connection — touches store stock) ──
@@ -193,6 +238,7 @@
       if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
 
       document.getElementById('issue-product').value = '';
+      document.getElementById('issue-product-search').value = '';
       document.getElementById('issue-qty').value = '';
       document.getElementById('issue-notes').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
@@ -235,6 +281,8 @@
         updateLorrySyncBadge((await getPendingLorrySales()).length);
       }
 
+      recordSaleInTodaySummary(productName, qty, unitPrice, paymentMethod);
+
       clearDeliveryForm();
       alert(navigator.onLine ? '✅ Delivered — sale recorded.' : '✅ Delivered — saved offline, will sync when back online.');
     }
@@ -244,6 +292,92 @@
       document.getElementById('delivery-qty').value = '';
       document.getElementById('delivery-price').value = '';
       document.getElementById('delivery-payment').value = 'cash';
+    }
+
+    // ─── TODAY'S LORRY SALES SUMMARY (local, per device, resets each day) ──
+    function todayKey() {
+      return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    function getTodaySummary() {
+      let stored;
+      try {
+        stored = JSON.parse(localStorage.getItem(LORRY_SALES_SUMMARY_KEY));
+      } catch (e) {
+        stored = null;
+      }
+      if (!stored || stored.date !== todayKey()) {
+        stored = { date: todayKey(), deliveries: [] };
+        localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(stored));
+      }
+      return stored;
+    }
+
+    function recordSaleInTodaySummary(productName, qty, unitPrice, paymentMethod) {
+      const summary = getTodaySummary();
+      summary.deliveries.push({
+        name: productName,
+        qty,
+        unitPrice,
+        total: qty * unitPrice,
+        paymentMethod,
+        time: new Date().toISOString()
+      });
+      localStorage.setItem(LORRY_SALES_SUMMARY_KEY, JSON.stringify(summary));
+      renderSalesSummary();
+    }
+
+    function renderSalesSummary() {
+      const el = document.getElementById('lorry-sales-summary');
+      if (!el) return;
+
+      const summary = getTodaySummary();
+      const deliveries = summary.deliveries;
+
+      if (!deliveries.length) {
+        el.innerHTML = '<div class="empty-state">No deliveries recorded yet today.</div>';
+        return;
+      }
+
+      const totalValue = deliveries.reduce((sum, d) => sum + d.total, 0);
+      const totalItems = deliveries.reduce((sum, d) => sum + d.qty, 0);
+
+      el.innerHTML = `
+        <div style="
+          display:flex;
+          justify-content:space-between;
+          align-items:baseline;
+          margin-bottom:10px;
+        ">
+          <span style="font-size:0.85rem; color:var(--muted);">
+            ${deliveries.length} delivery${deliveries.length === 1 ? '' : 'ies'} · ${totalItems} item(s)
+          </span>
+          <span style="font-size:1.3rem; font-weight:800;">
+            Ksh ${totalValue.toLocaleString()}
+          </span>
+        </div>
+        <div style="max-height:220px; overflow-y:auto;">
+          ${deliveries.slice().reverse().map(d => `
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:8px;
+              padding:6px 0;
+              border-bottom:1px solid var(--border);
+              font-size:0.85rem;
+            ">
+              <div>
+                <strong>${escapeHtml(d.name)}</strong>
+                <div style="color:var(--muted); font-size:0.75rem;">
+                  ${d.qty} × Ksh ${d.unitPrice.toLocaleString()} · ${escapeHtml(d.paymentMethod)}
+                </div>
+              </div>
+              <span style="font-weight:600;">Ksh ${d.total.toLocaleString()}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
     }
 
     // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
