@@ -350,16 +350,33 @@
     }
 
     // ─── STORE INVENTORY ────────────────────────────────────────────────────
+    // Sizes look like "30*4", "72*8", "24*48*2" — a plain text sort gets this
+    // wrong once widths have a different number of digits (e.g. "9" vs "36").
+    // Pull out all the numbers in the size and compare those, in order.
+    function sizeSortKey(p) {
+      const nums = (p.size || '').match(/\d+(\.\d+)?/g);
+      return nums ? nums.map(Number) : [Infinity];
+    }
+
+    function compareBySize(a, b) {
+      const ka = sizeSortKey(a), kb = sizeSortKey(b);
+      for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+        const va = ka[i] ?? -Infinity, vb = kb[i] ?? -Infinity;
+        if (va !== vb) return va - vb;
+      }
+      return displayName(a).localeCompare(displayName(b));
+    }
+
     async function loadStoreProducts() {
       if (!navigator.onLine) {
         const cached = cacheGet('store_products');
-        if (cached) { storeProducts = cached.data; renderStoreTable(storeProducts); updateSummary(); populateProductSelect(); }
+        if (cached) { storeProducts = cached.data.sort(compareBySize); renderStoreTable(storeProducts); updateSummary(); populateProductSelect(); }
         return;
       }
       const { data, error } = await supabaseClient
         .from('store_products').select('*').eq('is_active', true).order('name');
       if (error) { console.error(error); return; }
-      storeProducts = data || [];
+      storeProducts = (data || []).sort(compareBySize);
       cacheSet('store_products', storeProducts);
       renderStoreTable(storeProducts);
       updateSummary();
@@ -376,7 +393,7 @@
       if (!rows.length) { el.innerHTML = '<div class="empty-state">No products yet. Click "+ Add Product".</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Density</th><th>Buying Price</th><th>Price</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Density</th><th>Buying Price</th><th>Selling Price</th><th>Stock</th><th></th></tr></thead>
           <tbody>
             ${rows.map(p => {
               const low = p.stock_quantity <= (p.reorder_level ?? 5);
