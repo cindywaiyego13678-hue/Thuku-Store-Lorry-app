@@ -59,7 +59,9 @@
           <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Reached the customer? Record whether they took the order or not.</p>
           <div class="field">
             <label>Product</label>
-            <select id="delivery-product"><option value="">— choose a product —</option></select>
+            <input type="text" id="delivery-product-search" list="delivery-product-options" placeholder="Type to search product..." autocomplete="off">
+            <input type="hidden" id="delivery-product">
+            <datalist id="delivery-product-options"></datalist>
           </div>
           <div style="display:flex; gap:10px;">
             <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="delivery-qty" min="0.01" step="any" placeholder="1"></div>
@@ -78,7 +80,9 @@
           <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">For general unsold stock at end of route (not tied to a specific order).</p>
           <div class="field">
             <label>Product</label>
-            <select id="return-product"><option value="">— choose a product —</option></select>
+            <input type="text" id="return-product-search" list="return-product-options" placeholder="Type to search product..." autocomplete="off">
+            <input type="hidden" id="return-product">
+            <datalist id="return-product-options"></datalist>
           </div>
           <div class="field"><label>Quantity</label><input type="number" id="return-qty" min="0.01" step="any" placeholder="e.g. 2"></div>
           <div class="field">
@@ -146,26 +150,37 @@
     }
 
     function populateProductSelects() {
-      const opts = storeProducts.map(p => `<option value="${p.id}" data-name="${escapeAttr(displayName(p))}" data-price="${p.price}">${escapeHtml(displayName(p))}</option>`).join('');
-      ['delivery-product','return-product'].forEach(id => {
-        document.getElementById(id).innerHTML = '<option value="">— choose a product —</option>' + opts;
-      });
-
       const datalist = document.getElementById('issue-product-options');
       datalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+
+      const deliveryDatalist = document.getElementById('delivery-product-options');
+      deliveryDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+
+      const returnDatalist = document.getElementById('return-product-options');
+      returnDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+    }
+
+    function findProductByName(typed) {
+      return storeProducts.find(p => displayName(p) === typed);
     }
 
     // ─── SEARCH: resolve typed product name to its id for Load Stock onto Lorry ──
     document.getElementById('issue-product-search').addEventListener('input', (e) => {
-      const typed = e.target.value.trim();
-      const match = storeProducts.find(p => displayName(p) === typed);
+      const match = findProductByName(e.target.value.trim());
       document.getElementById('issue-product').value = match ? match.id : '';
     });
 
-    document.getElementById('delivery-product').addEventListener('change', (e) => {
-      const opt = e.target.options[e.target.selectedIndex];
-      const price = opt.dataset.price;
-      if (price) document.getElementById('delivery-price').value = price;
+    // ─── SEARCH: resolve typed product name for Record Delivery Outcome ──
+    document.getElementById('delivery-product-search').addEventListener('input', (e) => {
+      const match = findProductByName(e.target.value.trim());
+      document.getElementById('delivery-product').value = match ? match.id : '';
+      if (match) document.getElementById('delivery-price').value = match.price;
+    });
+
+    // ─── SEARCH: resolve typed product name for Record a Return ──
+    document.getElementById('return-product-search').addEventListener('input', (e) => {
+      const match = findProductByName(e.target.value.trim());
+      document.getElementById('return-product').value = match ? match.id : '';
     });
 
     async function loadLorryStock() {
@@ -205,14 +220,17 @@
 
     // ─── TAP A LORRY-STOCK ROW: auto-fill the delivery form ──
     function fillDeliveryProduct(productId) {
-      const select = document.getElementById('delivery-product');
-      select.value = productId;
-      select.dispatchEvent(new Event('change'));
+      const product = storeProducts.find(p => String(p.id) === String(productId));
+      if (!product) return;
+
+      document.getElementById('delivery-product').value = productId;
+      document.getElementById('delivery-product-search').value = displayName(product);
+      document.getElementById('delivery-price').value = product.price;
 
       const qtyInput = document.getElementById('delivery-qty');
       if (!qtyInput.value) qtyInput.value = 1;
 
-      document.getElementById('delivery-product')
+      document.getElementById('delivery-product-search')
         .closest('.card')
         .scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -249,8 +267,7 @@
     async function markDelivered() {
       const errorEl = document.getElementById('delivery-error');
       errorEl.style.display = 'none';
-      const select = document.getElementById('delivery-product');
-      const productId = select.value;
+      const productId = document.getElementById('delivery-product').value;
       const qty = parseFloat(document.getElementById('delivery-qty').value);
       const unitPrice = parseFloat(document.getElementById('delivery-price').value);
       const paymentMethod = document.getElementById('delivery-payment').value;
@@ -258,7 +275,8 @@
       if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
       if (!qty || qty <= 0 || isNaN(unitPrice)) { errorEl.textContent = 'Please enter a valid quantity and price.'; errorEl.style.display = 'block'; return; }
 
-      const productName = select.options[select.selectedIndex].dataset.name;
+      const product = storeProducts.find(p => String(p.id) === String(productId));
+      const productName = product ? displayName(product) : 'Unknown product';
       const saleData = {
         store_product_id: productId, product_name: productName, quantity: qty, unit_price: unitPrice,
         customer_name: null, customer_phone: null,
@@ -289,6 +307,7 @@
 
     function clearDeliveryForm() {
       document.getElementById('delivery-product').value = '';
+      document.getElementById('delivery-product-search').value = '';
       document.getElementById('delivery-qty').value = '';
       document.getElementById('delivery-price').value = '';
       document.getElementById('delivery-payment').value = 'cash';
@@ -399,6 +418,7 @@
       if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
 
       document.getElementById('return-product').value = '';
+      document.getElementById('return-product-search').value = '';
       document.getElementById('return-qty').value = '';
       document.getElementById('return-condition').value = 'good';
       document.getElementById('return-reason').value = '';
