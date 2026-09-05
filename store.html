@@ -43,7 +43,7 @@
 
     <div class="summary-row">
       <div class="summary-box"><div class="label">Products in Store</div><div class="value" id="sum-products">—</div></div>
-      <div class="summary-box"><div class="label">Store Stock Value (cost)</div><div class="value" id="sum-value">—</div></div>
+      <div class="summary-box"><div class="label">Store Stock Value (buying price)</div><div class="value" id="sum-value">—</div></div>
       <div class="summary-box"><div class="label">Unpaid Transfers</div><div class="value" id="sum-unpaid" style="color:#dc2626;">—</div></div>
       <div class="summary-box" id="profit-box" style="display:none;"><div class="label">Lorry Profit (Today)</div><div class="value" id="sum-profit" style="color:#059669;">—</div></div>
       <div class="summary-box" id="loss-box" style="display:none;"><div class="label">Damaged Stock Loss (Today)</div><div class="value" id="sum-loss" style="color:#dc2626;">—</div></div>
@@ -80,8 +80,8 @@
               <input type="number" id="restock-qty" min="0.01" step="any" placeholder="e.g. 20">
             </div>
             <div class="field" style="flex:1; margin:0; min-width:100px;">
-              <label>Cost per unit (Ksh)</label>
-              <input type="number" id="restock-cost" min="0" step="any" placeholder="current cost">
+              <label>Buying price per unit (Ksh)</label>
+              <input type="number" id="restock-cost" min="0" step="any" placeholder="current buying price">
             </div>
             <button onclick="addRestockItem()" style="margin-bottom:0; white-space:nowrap;">Add Item</button>
           </div>
@@ -188,7 +188,7 @@
       </div>
       <div class="field"><label id="pm-stock-label">Stock Quantity</label><input id="pm-stock" type="number" min="0" step="any" placeholder="e.g. 20"></div>
       <div class="field"><label>Reorder Level</label><input id="pm-reorder" type="number" min="0" step="any" placeholder="e.g. 5"></div>
-      <div class="field"><label>Cost Price (Ksh)</label><input id="pm-cost" type="number" placeholder="e.g. 8000"></div>
+      <div class="field"><label>Buying Price (Ksh)</label><input id="pm-cost" type="number" placeholder="e.g. 8000"></div>
       <div class="field"><label>Selling Price (Ksh)</label><input id="pm-price" type="number" placeholder="e.g. 12000"></div>
     </div>
     <p id="pm-stock-preview" style="font-size:0.85rem; color:var(--muted); margin-top:-10px;"></p>
@@ -262,7 +262,7 @@
       let totalRevenue = 0, totalCost = 0, totalProfit = 0;
       el.innerHTML = `
         <table>
-          <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty</th><th>Cost Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
+          <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty</th><th>Buying Price</th><th>Selling Price</th><th>Profit</th></tr></thead>
           <tbody>
             ${rows.map(r => {
               totalRevenue += Number(r.revenue); totalCost += Number(r.cost); totalProfit += Number(r.profit);
@@ -376,7 +376,7 @@
       if (!rows.length) { el.innerHTML = '<div class="empty-state">No products yet. Click "+ Add Product".</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Density</th><th>Cost</th><th>Price</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Product</th><th>Density</th><th>Buying Price</th><th>Price</th><th>Stock</th><th></th></tr></thead>
           <tbody>
             ${rows.map(p => {
               const low = p.stock_quantity <= (p.reorder_level ?? 5);
@@ -696,7 +696,7 @@
           <div style="flex:1;">
             <div class="transfer-item-name">${escapeHtml(item.product_name)}</div>
             <div style="font-size:0.78rem; color:var(--muted);">
-              Current stock: ${item.current_stock} · Cost: Ksh ${Number(item.unit_cost).toLocaleString()}${costChanged ? ` (was Ksh ${Number(item.current_cost).toLocaleString()})` : ''}
+              Current stock: ${item.current_stock} · Buying price: Ksh ${Number(item.unit_cost).toLocaleString()}${costChanged ? ` (was Ksh ${Number(item.current_cost).toLocaleString()})` : ''}
             </div>
           </div>
           <input class="transfer-qty-input" type="number" min="0.01" step="any" value="${item.quantity}" onchange="updateRestockItemQty(${idx}, this.value)">
@@ -767,7 +767,7 @@
 
       el.innerHTML = `
         <table>
-          <thead><tr><th>Date</th><th>Items</th><th>Supplier</th><th>Cost</th></tr></thead>
+          <thead><tr><th>Date</th><th>Items</th><th>Supplier</th><th>Buying Price</th></tr></thead>
           <tbody>
             ${data.map(r => {
               const dateStr = new Date(r.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
