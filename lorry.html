@@ -182,7 +182,7 @@
         return;
       }
       const { data, error } = await supabaseClient
-        .from('lorry_stock').select('*, store_products(name, size, manufacturer, price)').gt('quantity', 0);
+        .from('lorry_stock').select('*, store_products(name, size, manufacturer, price, density)').gt('quantity', 0);
       if (error) { console.error(error); return; }
       lorryStock = data || [];
       cacheSet('lorry_stock', lorryStock);
@@ -202,7 +202,11 @@
               return `
               <tr>
                 <td>${escapeHtml(displayName(sp))}</td>
-                <td><span class="badge in_stock">${r.quantity}</span></td>
+                <td>
+                  <input type="number" min="0" step="any" style="width:80px;"
+                    value="${r.quantity}"
+                    onchange="adjustLorryQty('${r.store_product_id}', this.value, this)">
+                </td>
                 <td>
                   <input type="number" min="0" step="any" style="width:100px;"
                     value="${defaultPrice}"
@@ -211,7 +215,27 @@
               </tr>`;
             }).join('')}
           </tbody>
-        </table>`;
+        </table>
+        <p style="color:var(--muted); font-size:0.78rem; margin:8px 0 0;">Made a mistake loading a quantity? Just type the correct number in "Qty on Lorry" — it fixes the lorry and store stock counts together.</p>`;
+    }
+
+    async function adjustLorryQty(productId, newQtyValue, inputEl) {
+      const newQty = parseFloat(newQtyValue);
+      const row = lorryStock.find(r => r.store_product_id === productId);
+      const oldQty = row ? row.quantity : 0;
+
+      if (isNaN(newQty) || newQty < 0) { alert('Enter a valid quantity (0 or more).'); if (inputEl) inputEl.value = oldQty; return; }
+      if (newQty === oldQty) return;
+      if (!navigator.onLine) { alert('Fixing a lorry quantity needs internet (it also corrects store stock).'); if (inputEl) inputEl.value = oldQty; return; }
+
+      const reason = prompt('Optional: why are you correcting this? (e.g. "typo, meant 10 not 15")') || null;
+
+      const { error } = await supabaseClient.rpc('adjust_lorry_stock', {
+        p_store_product_id: productId, p_new_quantity: newQty, p_staff_id: currentStaff.id, p_reason: reason
+      });
+      if (error) { alert('Error: ' + error.message); if (inputEl) inputEl.value = oldQty; return; }
+
+      await Promise.all([loadStoreProducts(), loadLorryStock()]);
     }
 
     function updateClosePrice(productId, value) {
