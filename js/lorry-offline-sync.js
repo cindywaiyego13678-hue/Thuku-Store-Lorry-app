@@ -66,7 +66,8 @@ async function syncPendingLorrySales() {
         p_customer_phone: sale.customer_phone,
         p_payment_method: sale.payment_method,
         p_staff_id: sale.staff_id,
-        p_synced: false
+        p_synced: false,
+        p_sale_date: sale.sale_date || null
       });
       if (error) throw error;
       await removePendingLorrySale(sale.localId);
