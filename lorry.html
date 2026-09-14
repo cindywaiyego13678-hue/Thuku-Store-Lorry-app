@@ -264,7 +264,10 @@
       document.getElementById('issue-qty').value = '';
       document.getElementById('issue-notes').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      alert('✅ Stock loaded onto the lorry.');
+      errorEl.style.color = '#1a7f37';
+      errorEl.textContent = '✅ Stock loaded onto the lorry.';
+      errorEl.style.display = 'block';
+      setTimeout(() => { errorEl.style.display = 'none'; errorEl.style.color = ''; }, 2500);
     }
 
     // ─── CLOSE ROUTE: mark everything still on the lorry as SOLD ──
