@@ -53,6 +53,11 @@
             <label>Payment method for these sales</label>
             <select id="close-route-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="mixed">Mixed / Various</option></select>
           </div>
+          <div class="field" style="max-width:220px;">
+            <label>Sale date</label>
+            <input type="date" id="close-route-date">
+            <p style="color:var(--muted); font-size:0.78rem; margin:4px 0 0;">Defaults to today — change this to backdate sales you're entering after the fact (e.g. adding sales for a past day/week you didn't log at the time).</p>
+          </div>
           <button onclick="closeRoute()" style="width:100%; background:#1a7f37;">✅ Close Route — Mark Remaining Stock as Sold</button>
           <p class="error-text" id="close-route-error" style="display:none;"></p>
         </div>
@@ -115,6 +120,7 @@
       }
       document.getElementById('profit-report-date').value = todayDateInputValue();
       document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
+      document.getElementById('close-route-date').value = todayDateInputValue();
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
       loadProfitReport();
     })();
@@ -247,7 +253,13 @@
       if (!rowsToSell.length) { alert('No stock left on the lorry to close out.'); return; }
       if (!navigator.onLine) { errorEl.textContent = 'Closing the route needs internet (it records sales against live stock).'; errorEl.style.display = 'block'; return; }
 
-      const confirmed = confirm(`This will mark ${rowsToSell.length} product(s) still on the lorry as SOLD at the prices shown. This can't be undone automatically — continue?`);
+      const saleDateStr = document.getElementById('close-route-date').value || todayDateInputValue();
+      const isBackdated = saleDateStr !== todayDateInputValue();
+      // Use midday on the chosen date so the sale lands clearly within that calendar day
+      // regardless of timezone, rather than right at midnight.
+      const saleTimestamp = `${saleDateStr}T12:00:00`;
+
+      const confirmed = confirm(`This will mark ${rowsToSell.length} product(s) still on the lorry as SOLD at the prices shown${isBackdated ? `, dated ${saleDateStr}` : ''}. This can't be undone automatically — continue?`);
       if (!confirmed) return;
 
       let successCount = 0;
@@ -266,7 +278,8 @@
           p_customer_phone: null,
           p_payment_method: paymentMethod,
           p_staff_id: currentStaff.id,
-          p_synced: true
+          p_synced: true,
+          p_sale_date: saleTimestamp
         });
 
         if (error) { failed.push(`${displayName(sp)}: ${error.message}`); continue; }
