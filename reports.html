@@ -112,7 +112,7 @@
       const revenue = sales.reduce((sum, s) => sum + Number(s.unit_price) * Number(s.quantity), 0);
       const itemsSold = sales.reduce((sum, s) => sum + Number(s.quantity), 0);
       const grossProfit = sales.reduce((sum, s) => {
-        const cost = Number(s.store_products?.cost || 0);
+        const cost = Number(s.unit_cost ?? s.store_products?.cost ?? 0);
         return sum + (Number(s.unit_price) - cost) * Number(s.quantity);
       }, 0);
 
@@ -133,12 +133,12 @@
             size: p?.size || '—',
             density: p?.density || '—',
             qty: 0,
-            cost: Number(p?.cost || 0),
-            price: Number(p?.price || 0),
+            cost: Number(s.unit_cost ?? p?.cost ?? 0),
+            price: Number(s.unit_price ?? p?.price ?? 0),
             profit: 0
           };
         }
-        const cost = Number(p?.cost || 0);
+        const cost = Number(s.unit_cost ?? p?.cost ?? 0);
         grouped[key].qty += Number(s.quantity);
         grouped[key].profit += (Number(s.unit_price) - cost) * Number(s.quantity);
       });
