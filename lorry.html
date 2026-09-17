@@ -8,6 +8,53 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .ledger-summary {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    border: 1px solid var(--border, #33455c);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+  }
+  .ledger-title {
+    font-weight: 700;
+    margin-bottom: 8px;
+    text-decoration: underline;
+  }
+  .ledger-line {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.3fr) 1fr 1fr;
+    gap: 14px;
+    white-space: nowrap;
+  }
+  .ledger-label { white-space: normal; }
+  .ledger-calc { text-align: left; }
+  .ledger-calc .arrow { margin: 0 4px; color: var(--muted, #8ea0b6); }
+  .ledger-totals {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.3fr) 1fr 1fr;
+    gap: 14px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border, #33455c);
+  }
+  .ledger-totals .ledger-qty-total { font-weight: 700; }
+  .ledger-totals-num {
+    font-weight: 700;
+    border-bottom: 2px solid currentColor;
+    display: inline-block;
+    padding-bottom: 2px;
+  }
+  .ledger-profit-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.3fr) 1fr 1fr;
+    gap: 14px;
+    margin-top: 4px;
+  }
+  .ledger-profit-row .ledger-profit-num { font-weight: 800; }
+</style>
 </head>
 <body>
   <div class="topbar">
@@ -317,6 +364,12 @@
       return new Date().toISOString().slice(0, 10);
     }
 
+    // "YYYY-MM-DD" -> "D/M/YYYY", matching the ledger's handwritten date style
+    function formatLedgerDate(isoDay) {
+      const [y, m, d] = isoDay.split('-');
+      return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+    }
+
     async function loadProfitReport() {
       const dateInput = document.getElementById('profit-report-date');
       if (!dateInput.value) dateInput.value = todayDateInputValue();
@@ -399,22 +452,32 @@
       });
 
       breakdownEl.innerHTML = `
-        <table>
-          <thead><tr><th>Brand</th><th>Product</th><th>Size</th><th>Density</th><th>Qty Sold</th><th>Revenue</th><th>Profit</th></tr></thead>
-          <tbody>
-            ${Object.values(byProduct).map(d => `
-              <tr>
-                <td>${escapeHtml(d.brand)}</td>
-                <td>${escapeHtml(d.product)}</td>
-                <td>${escapeHtml(d.size)}</td>
-                <td>${escapeHtml(d.density)}</td>
-                <td>${d.qty}</td>
-                <td>Ksh ${d.revenue.toLocaleString()}</td>
-                <td style="color:${(d.revenue - d.cost) >= 0 ? '#1a7f37' : '#c0392b'}; font-weight:600;">Ksh ${(d.revenue - d.cost).toLocaleString()}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+        <div class="ledger-summary">
+          <div class="ledger-title">Summary ${formatLedgerDate(day)}</div>
+          ${Object.values(byProduct).map(d => {
+            const label = [d.size, d.density, d.brand !== '—' ? d.brand : ''].filter(Boolean).join(' ');
+            // Unit prices can vary sale-to-sale (price changes over time); show the
+            // average for display while the per-sale totals underneath stay exact.
+            const sellUnit = d.qty ? Math.round(d.revenue / d.qty) : 0;
+            const costUnit = d.qty ? Math.round(d.cost / d.qty) : 0;
+            return `
+              <div class="ledger-line">
+                <span class="ledger-label">- ${escapeHtml(label)}</span>
+                <span class="ledger-calc">${d.qty} x ${sellUnit.toLocaleString()}<span class="arrow">→</span>${Math.round(d.revenue).toLocaleString()}</span>
+                <span class="ledger-calc">${d.qty} x ${costUnit.toLocaleString()}<span class="arrow">→</span>${Math.round(d.cost).toLocaleString()}</span>
+              </div>`;
+          }).join('')}
+          <div class="ledger-totals">
+            <span class="ledger-qty-total">${itemsSold} total</span>
+            <span class="ledger-totals-num">${Math.round(revenue).toLocaleString()}</span>
+            <span class="ledger-totals-num">${Math.round(cost).toLocaleString()}</span>
+          </div>
+          <div class="ledger-profit-row">
+            <span></span>
+            <span class="ledger-profit-num" style="color:${profit >= 0 ? '#1a7f37' : '#c0392b'};">${Math.round(profit).toLocaleString()}</span>
+            <span></span>
+          </div>
+        </div>
       `;
 
       salesListEl.innerHTML = `
