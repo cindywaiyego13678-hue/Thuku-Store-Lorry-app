@@ -12,7 +12,7 @@
 // changing static assets (icons, manifest) stay cache-first,
 // since serving those instantly is safe and desirable.
 // ============================================================
-const CACHE_NAME = 'thuku-store-lorry-shell-v2';
+const CACHE_NAME = 'thuku-store-lorry-shell-v3';
 
 const APP_SHELL = [
   './',
@@ -24,14 +24,14 @@ const APP_SHELL = [
   'js/offline-cache.js',
   'js/lorry-offline-sync.js',
   'manifest.json',
-  'icons/icon-192.png',
-  'icons/icon-512.png'
+  'icon-192.png',
+  'icon-512.png'
 ];
 
 // Static assets it's safe to serve instantly from cache and
 // refresh quietly in the background — these change rarely.
 const CACHE_FIRST_PATTERNS = [
-  /\/icons\//,
+  /icon-(192|512)\.png$/,
   /manifest\.json$/
 ];
 
