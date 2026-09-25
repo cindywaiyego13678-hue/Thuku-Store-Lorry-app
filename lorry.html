@@ -137,9 +137,40 @@
           </div>
           <div id="profit-report-summary"></div>
           <div id="profit-report-breakdown" style="margin-top:10px;"></div>
+
+          <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border, #2a3b52);">
+            <h4 style="margin-bottom:8px;">Add Expense</h4>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+              <div class="field" style="min-width:140px;">
+                <label>Category</label>
+                <select id="lorry-expense-category">
+                  <option>Fuel</option>
+                  <option>Maintenance</option>
+                  <option>Wages</option>
+                  <option>Tolls/Parking</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:180px; flex:1;">
+                <label>Description</label>
+                <input type="text" id="lorry-expense-description" placeholder="e.g. Diesel top-up">
+              </div>
+              <div class="field" style="min-width:120px;">
+                <label>Amount (Ksh)</label>
+                <input type="number" id="lorry-expense-amount" min="0" step="1" placeholder="0">
+              </div>
+              <div class="field">
+                <button onclick="addLorryExpense()">Add Expense</button>
+              </div>
+            </div>
+            <p style="margin-bottom:0; opacity:0.7; font-size:0.85em;">Recorded against the date selected above.</p>
+            <div id="lorry-expenses-list" style="margin-top:10px;"></div>
+          </div>
+
           <div id="profit-report-saleslist" style="margin-top:16px;"></div>
         </div>
       </div>
+
     </div>
   </div>
 
@@ -417,6 +448,7 @@
       const sales = data || [];
       const expenses = expenseData || [];
       const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      renderLorryExpensesList(expenses);
 
       if (!sales.length) {
         if (!totalExpenses) {
@@ -559,6 +591,82 @@
 
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
     function escapeAttr(str) { return (str ?? '').replace(/"/g, '&quot;'); }
+
+    function renderLorryExpensesList(expenses) {
+      const listEl = document.getElementById('lorry-expenses-list');
+      if (!expenses.length) {
+        listEl.innerHTML = '<div class="empty-state">No expenses recorded for this date.</div>';
+        return;
+      }
+      const canDelete = currentStaff.role === 'admin';
+      listEl.innerHTML = `
+        <table>
+          <thead><tr><th>Time</th><th>Category</th><th>Description</th><th>Amount</th>${canDelete ? '<th></th>' : ''}</tr></thead>
+          <tbody>
+            ${expenses.map(e => {
+              const time = new Date(e.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+              return `
+                <tr>
+                  <td>${time}</td>
+                  <td>${escapeHtml(e.category)}</td>
+                  <td>${escapeHtml(e.description || '—')}</td>
+                  <td style="color:#c0392b; font-weight:600;">Ksh ${Number(e.amount).toLocaleString()}</td>
+                  ${canDelete ? `<td><button class="secondary" onclick="deleteLorryExpense('${e.id}')">Delete</button></td>` : ''}
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    async function addLorryExpense() {
+      const dateInput = document.getElementById('profit-report-date');
+      if (!dateInput.value) dateInput.value = todayDateInputValue();
+      const day = dateInput.value;
+
+      const category = document.getElementById('lorry-expense-category').value;
+      const description = document.getElementById('lorry-expense-description').value.trim();
+      const amountRaw = document.getElementById('lorry-expense-amount').value;
+      const amount = Number(amountRaw);
+
+      if (!amountRaw || isNaN(amount) || amount <= 0) {
+        alert('Please enter a valid expense amount.');
+        return;
+      }
+
+      // Record at the current time of day, but pinned to the selected report date
+      const now = new Date();
+      const [y, m, d] = day.split('-').map(Number);
+      const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+
+      const { error } = await supabaseClient
+        .from('expenses')
+        .insert([{
+          category,
+          description: description || null,
+          amount,
+          recorded_by: currentStaff.id,
+          created_at: createdAt
+        }]);
+
+      if (error) {
+        alert('Error saving expense: ' + error.message);
+        return;
+      }
+
+      document.getElementById('lorry-expense-description').value = '';
+      document.getElementById('lorry-expense-amount').value = '';
+      await loadProfitReport();
+    }
+
+    async function deleteLorryExpense(id) {
+      if (!confirm('Delete this expense?')) return;
+      const { error } = await supabaseClient.from('expenses').delete().eq('id', id);
+      if (error) {
+        alert('Error deleting expense: ' + error.message);
+        return;
+      }
+      await loadProfitReport();
+    }
   </script>
 </body>
 </html>
