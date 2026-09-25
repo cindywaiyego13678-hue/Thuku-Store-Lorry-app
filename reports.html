@@ -35,9 +35,47 @@
       <div class="stat-card"><div class="label">Gross Profit</div><div class="value good" id="total-profit">Ksh 0</div></div>
     </div>
 
+    <div class="grid grid-4">
+      <div class="stat-card"><div class="label">Total Expenses</div><div class="value" id="total-expenses" style="color:#991b1b;">Ksh 0</div></div>
+      <div class="stat-card"><div class="label">Net Profit (after expenses)</div><div class="value good" id="net-profit">Ksh 0</div></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Record Expense</h2>
+      <div class="grid grid-4">
+        <div>
+          <label>Category</label>
+          <select id="expense-category">
+            <option>Fuel</option>
+            <option>Maintenance</option>
+            <option>Wages</option>
+            <option>Tolls/Parking</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div>
+          <label>Description</label>
+          <input type="text" id="expense-description" placeholder="e.g. Diesel top-up">
+        </div>
+        <div>
+          <label>Amount (Ksh)</label>
+          <input type="number" id="expense-amount" min="0" step="1" placeholder="0">
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button onclick="addExpense()" style="width:100%;">Add Expense</button>
+        </div>
+      </div>
+      <p style="margin-bottom:0; opacity:0.7; font-size:0.9em;">Expenses are recorded against the report date selected above.</p>
+    </div>
+
     <div class="card">
       <h2 style="margin-top:0;">Profit by Product</h2>
       <div id="profit-table"><div class="empty-state">Pick a date and generate the report.</div></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Expenses for the Day</h2>
+      <div id="expenses-list"><div class="empty-state">No data yet.</div></div>
     </div>
 
     <div class="card">
@@ -83,31 +121,104 @@
       return [p.size, p.name, p.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
     }
 
-    async function loadDailyReport() {
+    function currentDayRange() {
       const dateInput = document.getElementById('report-date').value;
-      if (!dateInput) { alert('Please select a date.'); return; }
+      if (!dateInput) return null;
+      return {
+        dateInput,
+        dayStart: new Date(dateInput + 'T00:00:00').toISOString(),
+        dayEnd: new Date(dateInput + 'T23:59:59.999').toISOString()
+      };
+    }
 
-      const dayStart = new Date(dateInput + 'T00:00:00').toISOString();
-      const dayEnd = new Date(dateInput + 'T23:59:59.999').toISOString();
+    async function loadDailyReport() {
+      const range = currentDayRange();
+      if (!range) { alert('Please select a date.'); return; }
+      const { dayStart, dayEnd } = range;
 
       // Pull lorry sales for the day, joined to store_products for cost/price/brand/size/density
-      const { data: sales, error } = await supabaseClient
+      const { data: sales, error: salesError } = await supabaseClient
         .from('lorry_sales')
         .select('*, store_products(name, manufacturer, size, density, cost, price, category)')
         .gte('created_at', dayStart)
         .lte('created_at', dayEnd)
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error(error);
-        alert('Error loading report: ' + error.message);
+      if (salesError) {
+        console.error(salesError);
+        alert('Error loading report: ' + salesError.message);
         return;
       }
 
-      renderReport(sales || []);
+      // Pull expenses for the same day
+      const { data: expenses, error: expenseError } = await supabaseClient
+        .from('expenses')
+        .select('*')
+        .gte('created_at', dayStart)
+        .lte('created_at', dayEnd)
+        .order('created_at', { ascending: false });
+
+      if (expenseError) {
+        console.error(expenseError);
+        alert('Error loading expenses: ' + expenseError.message);
+        return;
+      }
+
+      renderReport(sales || [], expenses || []);
     }
 
-    function renderReport(sales) {
+    async function addExpense() {
+      const range = currentDayRange();
+      if (!range) { alert('Please select a report date first.'); return; }
+
+      const category = document.getElementById('expense-category').value;
+      const description = document.getElementById('expense-description').value.trim();
+      const amountRaw = document.getElementById('expense-amount').value;
+      const amount = Number(amountRaw);
+
+      if (!amountRaw || isNaN(amount) || amount <= 0) {
+        alert('Please enter a valid expense amount.');
+        return;
+      }
+
+      // Record the expense at the current time, but on the selected report date
+      const now = new Date();
+      const [y, m, d] = range.dateInput.split('-').map(Number);
+      const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+
+      const { error } = await supabaseClient
+        .from('expenses')
+        .insert([{
+          category,
+          description: description || null,
+          amount,
+          recorded_by: currentStaffReports.id,
+          created_at: createdAt
+        }]);
+
+      if (error) {
+        console.error(error);
+        alert('Error saving expense: ' + error.message);
+        return;
+      }
+
+      document.getElementById('expense-description').value = '';
+      document.getElementById('expense-amount').value = '';
+      await loadDailyReport();
+    }
+
+    async function deleteExpense(id) {
+      if (!confirm('Delete this expense?')) return;
+      const { error } = await supabaseClient.from('expenses').delete().eq('id', id);
+      if (error) {
+        console.error(error);
+        alert('Error deleting expense: ' + error.message);
+        return;
+      }
+      await loadDailyReport();
+    }
+
+    function renderReport(sales, expenses) {
       const transactions = sales.length;
       const revenue = sales.reduce((sum, s) => sum + Number(s.unit_price) * Number(s.quantity), 0);
       const itemsSold = sales.reduce((sum, s) => sum + Number(s.quantity), 0);
@@ -115,11 +226,19 @@
         const cost = Number(s.unit_cost ?? s.store_products?.cost ?? 0);
         return sum + (Number(s.unit_price) - cost) * Number(s.quantity);
       }, 0);
+      const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      const netProfit = grossProfit - totalExpenses;
 
       document.getElementById('total-sales').textContent = transactions;
       document.getElementById('total-revenue').textContent = `Ksh ${revenue.toLocaleString()}`;
       document.getElementById('items-sold').textContent = itemsSold;
       document.getElementById('total-profit').textContent = `Ksh ${Math.round(grossProfit).toLocaleString()}`;
+      document.getElementById('total-expenses').textContent = `Ksh ${Math.round(totalExpenses).toLocaleString()}`;
+
+      const netProfitEl = document.getElementById('net-profit');
+      netProfitEl.textContent = `Ksh ${Math.round(netProfit).toLocaleString()}`;
+      netProfitEl.className = `value ${netProfit >= 0 ? 'good' : ''}`;
+      netProfitEl.style.color = netProfit >= 0 ? '' : '#991b1b';
 
       // ---- Profit by Product (grouped) ----
       const grouped = {};
@@ -163,6 +282,31 @@
                   <td>Ksh ${r.price.toLocaleString()}</td>
                   <td style="color:${r.profit >= 0 ? '#065f46' : '#991b1b'}; font-weight:600;">Ksh ${Math.round(r.profit).toLocaleString()}</td>
                 </tr>`).join('')}
+            </tbody>
+          </table>`;
+      }
+
+      // ---- Expenses list ----
+      const expensesEl = document.getElementById('expenses-list');
+      if (!expenses.length) {
+        expensesEl.innerHTML = '<div class="empty-state">No expenses recorded for this date.</div>';
+      } else {
+        const canDelete = currentStaffReports.role === 'admin';
+        expensesEl.innerHTML = `
+          <table>
+            <thead><tr><th>Time</th><th>Category</th><th>Description</th><th>Amount</th>${canDelete ? '<th></th>' : ''}</tr></thead>
+            <tbody>
+              ${expenses.map(e => {
+                const time = new Date(e.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+                return `
+                  <tr>
+                    <td>${time}</td>
+                    <td>${escapeHtmlReports(e.category)}</td>
+                    <td>${escapeHtmlReports(e.description || '—')}</td>
+                    <td style="color:#991b1b; font-weight:600;">Ksh ${Number(e.amount).toLocaleString()}</td>
+                    ${canDelete ? `<td><button class="secondary" onclick="deleteExpense('${e.id}')">Delete</button></td>` : ''}
+                  </tr>`;
+              }).join('')}
             </tbody>
           </table>`;
       }
