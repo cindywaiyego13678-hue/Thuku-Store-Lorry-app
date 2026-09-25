@@ -402,9 +402,40 @@
         return;
       }
 
+      const { data: expenseData, error: expenseError } = await supabaseClient
+        .from('expenses')
+        .select('*')
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: false });
+
+      if (expenseError) {
+        summaryEl.innerHTML = `<div class="empty-state">Error loading expenses: ${escapeHtml(expenseError.message)}</div>`;
+        return;
+      }
+
       const sales = data || [];
+      const expenses = expenseData || [];
+      const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
       if (!sales.length) {
-        summaryEl.innerHTML = '<div class="empty-state">No sales recorded for this day.</div>';
+        if (!totalExpenses) {
+          summaryEl.innerHTML = '<div class="empty-state">No sales recorded for this day.</div>';
+          return;
+        }
+        summaryEl.innerHTML = `
+          <div class="empty-state" style="margin-bottom:10px;">No sales recorded for this day.</div>
+          <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+            <div>
+              <div style="color:var(--muted); font-size:0.75rem;">Expenses</div>
+              <div style="font-weight:800; font-size:1.15rem; color:#c0392b;">Ksh ${Math.round(totalExpenses).toLocaleString()}</div>
+            </div>
+            <div>
+              <div style="color:var(--muted); font-size:0.75rem;">Net Profit</div>
+              <div style="font-weight:800; font-size:1.15rem; color:#c0392b;">Ksh ${Math.round(-totalExpenses).toLocaleString()}</div>
+            </div>
+          </div>
+        `;
         return;
       }
 
@@ -412,6 +443,7 @@
       const cost = sales.reduce((sum, s) => sum + (s.quantity * (s.unit_cost ?? s.store_products?.cost ?? 0)), 0);
       const itemsSold = sales.reduce((sum, s) => sum + Number(s.quantity), 0);
       const profit = revenue - cost;
+      const netProfit = profit - totalExpenses;
 
       summaryEl.innerHTML = `
         <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
@@ -430,6 +462,14 @@
           <div>
             <div style="color:var(--muted); font-size:0.75rem;">Profit</div>
             <div style="font-weight:800; font-size:1.15rem; color:${profit >= 0 ? '#1a7f37' : '#c0392b'};">Ksh ${profit.toLocaleString()}</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:0.75rem;">Expenses</div>
+            <div style="font-weight:800; font-size:1.15rem; color:#c0392b;">Ksh ${Math.round(totalExpenses).toLocaleString()}</div>
+          </div>
+          <div>
+            <div style="color:var(--muted); font-size:0.75rem;">Net Profit</div>
+            <div style="font-weight:800; font-size:1.15rem; color:${netProfit >= 0 ? '#1a7f37' : '#c0392b'};">Ksh ${Math.round(netProfit).toLocaleString()}</div>
           </div>
         </div>
       `;
@@ -478,6 +518,17 @@
             <span class="ledger-profit-num" style="color:${profit >= 0 ? '#1a7f37' : '#c0392b'};">${Math.round(profit).toLocaleString()}</span>
             <span></span>
           </div>
+          ${totalExpenses ? `
+          <div class="ledger-line">
+            <span class="ledger-label">Expenses</span>
+            <span></span>
+            <span class="ledger-calc" style="color:#c0392b;">-${Math.round(totalExpenses).toLocaleString()}</span>
+          </div>
+          <div class="ledger-profit-row">
+            <span>Net Profit</span>
+            <span class="ledger-profit-num" style="color:${netProfit >= 0 ? '#1a7f37' : '#c0392b'};">${Math.round(netProfit).toLocaleString()}</span>
+            <span></span>
+          </div>` : ''}
         </div>
       `;
 
