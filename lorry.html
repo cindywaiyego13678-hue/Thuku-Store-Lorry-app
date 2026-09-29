@@ -98,6 +98,7 @@
           <h3 style="margin-top:0;">Current Lorry Stock</h3>
           <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Adjust the price for any item if it differs from the standard price — leftover stock is sold at the price shown here when you close the route.</p>
           <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
+          <button id="clear-lorry-btn" class="secondary" onclick="clearAllLorryStock()" style="width:100%; margin-top:12px; color:#c0392b; border-color:#c0392b; display:none;">🗑 Delete ALL Lorry Stock</button>
         </div>
 
         <div class="card">
@@ -138,25 +139,25 @@
 
         <div class="card" id="backdate-card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">🕓 Add Past Lorry Sale</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Enter a sale that happened on an earlier date. It appears in the Profit Report for that date. <b>It does not change store or lorry stock</b> — adjust stock separately if needed.</p>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Tick the products sold, set the quantity and price. They appear in the Profit Report for the date chosen. <b>Store and lorry stock are not changed.</b></p>
           <div class="field"><label>Sale date</label><input type="date" id="past-sale-date"></div>
           <div class="field">
-            <label>Product</label>
-            <input type="text" id="past-sale-search" list="past-sale-options" placeholder="Type to search product..." autocomplete="off">
-            <input type="hidden" id="past-sale-product">
-            <datalist id="past-sale-options"></datalist>
+            <input type="text" id="past-filter" placeholder="Filter products..." autocomplete="off">
           </div>
-          <div style="display:flex; gap:10px;">
-            <div class="field" style="flex:1;"><label>Quantity</label><input type="number" id="past-sale-qty" min="0.01" step="any" placeholder="e.g. 3"></div>
-            <div class="field" style="flex:1;"><label>Unit price (Ksh)</label><input type="number" id="past-sale-price" min="0" step="any" placeholder="0"></div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label style="display:flex; gap:6px; align-items:center; cursor:pointer; margin:0;">
+              <input type="checkbox" id="past-select-all"> Select all shown
+            </label>
+            <span id="past-selected-count" style="color:var(--muted); font-size:0.8rem;">0 selected</span>
           </div>
-          <div style="display:flex; gap:10px;">
+          <div id="past-list" style="max-height:340px; overflow-y:auto; border:1px solid var(--border, #e2e6ea); border-radius:8px;"></div>
+          <div style="display:flex; gap:10px; margin-top:12px;">
             <div class="field" style="flex:1;"><label>Customer (optional)</label><input type="text" id="past-sale-customer" placeholder="Walk-in"></div>
             <div class="field" style="flex:1;"><label>Payment</label>
               <select id="past-sale-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="mixed">Mixed / Various</option></select>
             </div>
           </div>
-          <button onclick="addPastSale()" style="width:100%;">Save Past Sale</button>
+          <button onclick="addPastSales()" style="width:100%;">Save Selected as Past Sales</button>
           <p class="error-text" id="past-sale-error" style="display:none;"></p>
         </div>
 
@@ -263,7 +264,7 @@
     function populateProductSelects() {
       const returnDatalist = document.getElementById('return-product-options');
       returnDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
-      document.getElementById('past-sale-options').innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+      renderPastList();
       renderIssueList();
     }
 
@@ -293,10 +294,11 @@
 
     function renderLorryStock() {
       const el = document.getElementById('lorry-stock-table');
+      document.getElementById('clear-lorry-btn').style.display = (canRemoveStock() && lorryStock.length) ? 'block' : 'none';
       if (!lorryStock.length) { el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>'; return; }
       el.innerHTML = `
         <table>
-          <thead><tr><th>Product</th><th>Qty on Lorry</th><th>Price (Ksh)</th></tr></thead>
+          <thead><tr><th>Product</th><th>Qty on Lorry</th><th>Price (Ksh)</th>${canRemoveStock() ? '<th></th>' : ''}</tr></thead>
           <tbody>
             ${lorryStock.map(r => {
               const sp = r.store_products || {};
@@ -310,10 +312,38 @@
                     value="${defaultPrice}"
                     onchange="updateClosePrice('${r.store_product_id}', this.value)">
                 </td>
+                ${canRemoveStock() ? `<td><button class="secondary" onclick="removeLorryStock('${r.store_product_id}')">Delete</button></td>` : ''}
               </tr>`;
             }).join('')}
           </tbody>
         </table>`;
+    }
+
+
+    // ─── DELETE LORRY STOCK (admin only) — removes the lorry_stock row only; store stock is NOT changed ──
+    function canRemoveStock() { return currentStaff && currentStaff.role === 'admin'; }
+
+    async function removeLorryStock(productId) {
+      const row = lorryStock.find(r => r.store_product_id === productId);
+      const name = row ? displayName(row.store_products || {}) : 'this item';
+      if (!confirm(`Delete ${name} (${row?.quantity ?? ''}) from the lorry?\n\nThis does NOT add it back to store stock. Use "Record a Return" for that.`)) return;
+      if (!navigator.onLine) { alert('Deleting lorry stock needs internet.'); return; }
+      const { error } = await supabaseClient.from('lorry_stock').delete().eq('store_product_id', productId);
+      if (error) { alert('Error deleting: ' + error.message); return; }
+      delete closeRoutePrices[productId];
+      await loadLorryStock();
+    }
+
+    async function clearAllLorryStock() {
+      if (!lorryStock.length) return;
+      if (!confirm(`Delete ALL ${lorryStock.length} product(s) from the lorry?\n\nThis does NOT add anything back to store stock and cannot be undone.`)) return;
+      if (!confirm('Are you sure? Everything on the lorry will be wiped.')) return;
+      if (!navigator.onLine) { alert('Deleting lorry stock needs internet.'); return; }
+      const ids = lorryStock.map(r => r.store_product_id);
+      const { error } = await supabaseClient.from('lorry_stock').delete().in('store_product_id', ids);
+      if (error) { alert('Error deleting: ' + error.message); return; }
+      closeRoutePrices = {};
+      await loadLorryStock();
     }
 
     function updateClosePrice(productId, value) {
@@ -698,55 +728,111 @@
     }
 
 
-    // ─── PAST (BACK-DATED) LORRY SALE — no stock movement ──
-    document.getElementById('past-sale-search').addEventListener('input', (e) => {
-      const match = findProductByName(e.target.value.trim());
-      document.getElementById('past-sale-product').value = match ? match.id : '';
-      if (match && !document.getElementById('past-sale-price').value) {
-        document.getElementById('past-sale-price').value = match.price ?? '';
+    // ─── PAST (BACK-DATED) LORRY SALES — checklist, no stock movement ──
+    let pastSelection = {};   // { store_product_id: { qty, price } }
+
+    function shownPastProducts() {
+      const q = document.getElementById('past-filter').value.trim().toLowerCase();
+      return storeProducts.filter(p => displayName(p).toLowerCase().includes(q));
+    }
+
+    function renderPastList() {
+      const el = document.getElementById('past-list');
+      const shown = shownPastProducts();
+      if (!shown.length) {
+        el.innerHTML = '<div class="empty-state">No products found.</div>';
+      } else {
+        el.innerHTML = `
+          <table>
+            <thead><tr><th></th><th>Product</th><th>Qty</th><th>Price (Ksh)</th></tr></thead>
+            <tbody>
+              ${shown.map(p => {
+                const sel = pastSelection[p.id];
+                return `
+                <tr>
+                  <td><input type="checkbox" ${sel ? 'checked' : ''} onchange="togglePast('${p.id}', this.checked)"></td>
+                  <td>${escapeHtml(displayName(p))}</td>
+                  <td><input type="number" min="0.01" step="any" style="width:70px;" ${sel ? '' : 'disabled'}
+                        value="${sel ? sel.qty : ''}" onchange="setPast('${p.id}', 'qty', this.value)"></td>
+                  <td><input type="number" min="0" step="any" style="width:90px;" ${sel ? '' : 'disabled'}
+                        value="${sel ? sel.price : ''}" onchange="setPast('${p.id}', 'price', this.value)"></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
       }
+      updatePastSummary();
+    }
+
+    function updatePastSummary() {
+      const shown = shownPastProducts();
+      document.getElementById('past-selected-count').textContent = `${Object.keys(pastSelection).length} selected`;
+      document.getElementById('past-select-all').checked = shown.length > 0 && shown.every(p => pastSelection[p.id]);
+    }
+
+    function togglePast(id, checked) {
+      if (checked) {
+        const p = storeProducts.find(x => x.id === id);
+        pastSelection[id] = { qty: 1, price: p?.price ?? 0 };
+      } else delete pastSelection[id];
+      renderPastList();
+    }
+
+    function setPast(id, field, value) {
+      if (pastSelection[id]) pastSelection[id][field] = parseFloat(value);
+    }
+
+    document.getElementById('past-filter').addEventListener('input', renderPastList);
+    document.getElementById('past-select-all').addEventListener('change', (e) => {
+      shownPastProducts().forEach(p => {
+        if (e.target.checked) { if (!pastSelection[p.id]) pastSelection[p.id] = { qty: 1, price: p.price ?? 0 }; }
+        else delete pastSelection[p.id];
+      });
+      renderPastList();
     });
 
-    async function addPastSale() {
+    async function addPastSales() {
       const errorEl = document.getElementById('past-sale-error');
       errorEl.style.display = 'none';
       const showErr = (m) => { errorEl.textContent = m; errorEl.style.display = 'block'; };
 
       const day = document.getElementById('past-sale-date').value;
-      const productId = document.getElementById('past-sale-product').value;
-      const qty = parseFloat(document.getElementById('past-sale-qty').value);
-      const price = parseFloat(document.getElementById('past-sale-price').value);
       const customer = document.getElementById('past-sale-customer').value.trim();
       const payment = document.getElementById('past-sale-payment').value;
+      const ids = Object.keys(pastSelection);
 
       if (!day) return showErr('Pick the sale date.');
-      if (!productId) return showErr('Select a product from the list.');
-      if (!qty || qty <= 0) return showErr('Enter a valid quantity.');
-      if (isNaN(price) || price < 0) return showErr('Enter a valid unit price.');
-      if (!navigator.onLine) return showErr('Saving a past sale needs internet.');
+      if (!ids.length) return showErr('Tick at least one product.');
+      if (!navigator.onLine) return showErr('Saving past sales needs internet.');
 
-      const p = storeProducts.find(x => x.id === productId);
       const now = new Date();
       const [y, m, d] = day.split('-').map(Number);
       const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
 
-      const { error } = await supabaseClient.from('lorry_sales').insert([{
-        store_product_id: productId,
-        quantity: qty,
-        unit_price: price,
-        unit_cost: p?.cost ?? null,
-        customer_name: customer || null,
-        payment_method: payment,
-        staff_id: currentStaff.id,
-        synced: true,
-        created_at: createdAt
-      }]);
+      const rows = [];
+      for (const id of ids) {
+        const p = storeProducts.find(x => x.id === id);
+        const { qty, price } = pastSelection[id];
+        if (!p) return showErr('A ticked product is no longer available. Refresh the page.');
+        if (!qty || qty <= 0) return showErr(`Enter a valid quantity for ${displayName(p)}.`);
+        if (isNaN(price) || price < 0) return showErr(`Enter a valid price for ${displayName(p)}.`);
+        rows.push({
+          store_product_id: id, quantity: qty, unit_price: price, unit_cost: p.cost ?? null,
+          customer_name: customer || null, payment_method: payment,
+          staff_id: currentStaff.id, synced: true, created_at: createdAt
+        });
+      }
+
+      const { error } = await supabaseClient.from('lorry_sales').insert(rows);
       if (error) return showErr('Error: ' + error.message);
 
-      ['past-sale-product','past-sale-search','past-sale-qty','past-sale-price','past-sale-customer'].forEach(id => document.getElementById(id).value = '');
+      pastSelection = {};
+      document.getElementById('past-filter').value = '';
+      document.getElementById('past-sale-customer').value = '';
+      renderPastList();
       document.getElementById('profit-report-date').value = day;
       await loadProfitReport();
-      alert('✅ Past sale saved for ' + formatLedgerDate(day) + '.');
+      alert(`✅ ${rows.length} past sale(s) saved for ${formatLedgerDate(day)}.`);
     }
 
     async function deleteLorrySale(id) {
