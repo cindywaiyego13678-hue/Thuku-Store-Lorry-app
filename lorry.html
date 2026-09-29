@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -73,17 +74,24 @@
 
       <!-- LEFT: Lorry stock + issue from store -->
       <div>
+        <!-- CHANGED: checklist-based loading -->
         <div class="card" id="issue-card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">📦 Load Stock onto Lorry</h3>
           <div class="field">
-            <label>Product</label>
-            <input type="text" id="issue-product-search" list="issue-product-options" placeholder="Type to search product..." autocomplete="off">
-            <input type="hidden" id="issue-product">
-            <datalist id="issue-product-options"></datalist>
+            <input type="text" id="issue-filter" placeholder="Filter products..." autocomplete="off">
           </div>
-          <div class="field"><label>Quantity</label><input type="number" id="issue-qty" min="0.01" step="any" placeholder="e.g. 10"></div>
-          <div class="field"><label>Notes (optional)</label><input type="text" id="issue-notes" placeholder="e.g. Morning route — Kasarani"></div>
-          <button onclick="issueStock()" style="width:100%;">Load onto Lorry</button>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label style="display:flex; gap:6px; align-items:center; cursor:pointer; margin:0;">
+              <input type="checkbox" id="issue-select-all"> Select all shown
+            </label>
+            <span id="issue-selected-count" style="color:var(--muted); font-size:0.8rem;">0 selected</span>
+          </div>
+          <div id="issue-list" style="max-height:340px; overflow-y:auto; border:1px solid var(--border, #e2e6ea); border-radius:8px;"></div>
+          <div class="field" style="margin-top:12px;">
+            <label>Notes (optional)</label>
+            <input type="text" id="issue-notes" placeholder="e.g. Morning route — Kasarani">
+          </div>
+          <button onclick="issueSelectedStock()" style="width:100%;">Load Selected onto Lorry</button>
           <p class="error-text" id="issue-error" style="display:none;"></p>
         </div>
 
@@ -182,6 +190,7 @@
     let lorryStock = [];
     let storeProducts = [];
     let closeRoutePrices = {}; // { store_product_id: price } — user overrides for close-route selling price
+    let issueSelection = {};   // { store_product_id: qty } — products ticked for loading onto the lorry
 
     (async () => {
       currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
@@ -225,23 +234,16 @@
       populateProductSelects();
     }
 
+    // CHANGED: only the return datalist remains; the issue list is now a checklist
     function populateProductSelects() {
-      const datalist = document.getElementById('issue-product-options');
-      datalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
-
       const returnDatalist = document.getElementById('return-product-options');
       returnDatalist.innerHTML = storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+      renderIssueList();
     }
 
     function findProductByName(typed) {
       return storeProducts.find(p => displayName(p) === typed);
     }
-
-    // ─── SEARCH: resolve typed product name to its id for Load Stock onto Lorry ──
-    document.getElementById('issue-product-search').addEventListener('input', (e) => {
-      const match = findProductByName(e.target.value.trim());
-      document.getElementById('issue-product').value = match ? match.id : '';
-    });
 
     // ─── SEARCH: resolve typed product name for Record a Return ──
     document.getElementById('return-product-search').addEventListener('input', (e) => {
@@ -292,29 +294,108 @@
       closeRoutePrices[productId] = parseFloat(value);
     }
 
-    // ─── ISSUE STOCK TO LORRY (needs live connection — touches store stock) ──
-    async function issueStock() {
+    // ─── CHECKLIST LOADING ONTO LORRY (needs live connection — touches store stock) ──
+    function stockOf(p) {
+      return Number(p.stock_quantity ?? 0);
+    }
+
+    function shownIssueProducts() {
+      const q = document.getElementById('issue-filter').value.trim().toLowerCase();
+      return storeProducts.filter(p => stockOf(p) > 0 && displayName(p).toLowerCase().includes(q));
+    }
+
+    function renderIssueList() {
+      const el = document.getElementById('issue-list');
+      const shown = shownIssueProducts();
+      if (!shown.length) {
+        el.innerHTML = '<div class="empty-state">No products in store stock.</div>';
+      } else {
+        el.innerHTML = `
+          <table>
+            <thead><tr><th></th><th>Product</th><th>In Store</th><th>Load Qty</th></tr></thead>
+            <tbody>
+              ${shown.map(p => {
+                const checked = issueSelection[p.id] !== undefined;
+                return `
+                <tr>
+                  <td><input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleIssue('${p.id}', this.checked)"></td>
+                  <td>${escapeHtml(displayName(p))}</td>
+                  <td><span class="badge in_stock">${stockOf(p)}</span></td>
+                  <td><input type="number" min="0.01" step="any" style="width:80px;"
+                        value="${checked ? issueSelection[p.id] : ''}" ${checked ? '' : 'disabled'}
+                        onchange="setIssueQty('${p.id}', this.value)"></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+      }
+      updateIssueSummary();
+    }
+
+    function updateIssueSummary() {
+      const shown = shownIssueProducts();
+      document.getElementById('issue-selected-count').textContent = `${Object.keys(issueSelection).length} selected`;
+      document.getElementById('issue-select-all').checked =
+        shown.length > 0 && shown.every(p => issueSelection[p.id] !== undefined);
+    }
+
+    function toggleIssue(id, checked) {
+      if (checked) issueSelection[id] = 1;   // default qty 1, change as needed
+      else delete issueSelection[id];
+      renderIssueList();
+    }
+
+    function setIssueQty(id, value) {
+      issueSelection[id] = parseFloat(value);
+    }
+
+    document.getElementById('issue-filter').addEventListener('input', renderIssueList);
+    document.getElementById('issue-select-all').addEventListener('change', (e) => {
+      shownIssueProducts().forEach(p => {
+        if (e.target.checked) { if (issueSelection[p.id] === undefined) issueSelection[p.id] = 1; }
+        else delete issueSelection[p.id];
+      });
+      renderIssueList();
+    });
+
+    async function issueSelectedStock() {
       const errorEl = document.getElementById('issue-error');
       errorEl.style.display = 'none';
-      const productId = document.getElementById('issue-product').value;
-      const qty = parseFloat(document.getElementById('issue-qty').value);
       const notes = document.getElementById('issue-notes').value.trim();
+      const ids = Object.keys(issueSelection);
 
-      if (!productId) { errorEl.textContent = 'Please select a product.'; errorEl.style.display = 'block'; return; }
-      if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
-      if (!navigator.onLine) { errorEl.textContent = 'Loading stock onto the lorry needs internet (it checks live store stock).'; errorEl.style.display = 'block'; return; }
+      const showErr = (msg) => { errorEl.textContent = msg; errorEl.style.display = 'block'; };
+      if (!ids.length) return showErr('Tick at least one product to load.');
+      if (!navigator.onLine) return showErr('Loading stock onto the lorry needs internet (it checks live store stock).');
 
-      const { error } = await supabaseClient.rpc('issue_to_lorry', {
-        p_store_product_id: productId, p_quantity: qty, p_staff_id: currentStaff.id, p_notes: notes || null
-      });
-      if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
+      // Validate everything first so a typo doesn't leave a half-loaded lorry
+      for (const id of ids) {
+        const p = storeProducts.find(x => x.id === id);
+        const qty = issueSelection[id];
+        if (!p) return showErr('A ticked product is no longer available. Refresh the page.');
+        if (!qty || qty <= 0) return showErr(`Enter a valid quantity for ${displayName(p)}.`);
+        if (qty > stockOf(p)) return showErr(`Only ${stockOf(p)} of ${displayName(p)} in store.`);
+      }
 
-      document.getElementById('issue-product').value = '';
-      document.getElementById('issue-product-search').value = '';
-      document.getElementById('issue-qty').value = '';
+      let ok = 0;
+      const failed = [];
+      for (const id of ids) {
+        const p = storeProducts.find(x => x.id === id);
+        const { error } = await supabaseClient.rpc('issue_to_lorry', {
+          p_store_product_id: id, p_quantity: issueSelection[id],
+          p_staff_id: currentStaff.id, p_notes: notes || null
+        });
+        if (error) { failed.push(`${displayName(p)}: ${error.message}`); continue; }
+        delete issueSelection[id];
+        ok++;
+      }
+
       document.getElementById('issue-notes').value = '';
+      document.getElementById('issue-filter').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      alert('✅ Stock loaded onto the lorry.');
+
+      if (failed.length) showErr(`Loaded ${ok}. Failed: ${failed.join('; ')}`);
+      else alert(`✅ ${ok} product(s) loaded onto the lorry.`);
     }
 
     // ─── CLOSE ROUTE: mark everything still on the lorry as SOLD ──
