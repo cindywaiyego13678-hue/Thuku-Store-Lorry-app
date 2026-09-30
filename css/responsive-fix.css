@@ -56,3 +56,25 @@ th, td { padding: 10px 12px; text-align: left; vertical-align: middle; }
 #history-table table, #restock-history-table table { min-width: 440px; }
 #history-table td, #restock-history-table td { vertical-align: top; }
 #issue-list th, #past-list th { position: sticky; top: 0; background: #eef1f5; z-index: 1; }
+
+/* ── FIXES FOR THINGS IN style.css THAT CAUSE SQUEEZING ──────── */
+
+/* style.css makes EVERY input 100% wide, including checkboxes.
+   In the lorry checklists that stretches the tick column and
+   squeezes the product name and quantity columns. */
+input[type="checkbox"], input[type="radio"] {
+  width: auto; padding: 0; margin: 0 6px 0 0; flex: none;
+}
+td input[type="checkbox"] { margin: 0; width: 18px; height: 18px; }
+
+/* style.css keeps 2 columns on phones for .grid-2/3/4 (forms like
+   Add Product, Restock supplier/notes). Use 1 column on small phones. */
+@media (max-width: 600px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+}
+
+/* style.css caps pages at 1100px; use more of big screens */
+.container { max-width: 1500px; }
+
+/* Quantity/price boxes inside tables shouldn't stretch full width */
+td input[type="number"] { width: 100px; max-width: 100%; }
