@@ -1,0 +1,58 @@
+/* Thuku — layout fix for squeezed login, store and lorry pages.
+   Load AFTER css/style.css so these rules win. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── LOGIN PAGES ─────────────────────────────── */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.login-card { width: 100%; max-width: 480px; padding: 36px 34px; }
+.login-card h1 { font-size: 1.7rem; }
+.login-card p.sub { font-size: 1rem; margin-bottom: 26px; line-height: 1.45; }
+.login-card .field { margin-bottom: 18px; }
+.login-card label { font-size: 0.9rem; }
+.login-card input { width: 100%; padding: 13px 14px; font-size: 1rem; }
+.login-card button { padding: 13px 16px; font-size: 1rem; }
+@media (max-width: 480px) { .login-card { padding: 26px 20px; } }
+
+/* ── APP PAGES (store.html, lorry.html) ──────── */
+.container { width: 100%; max-width: 1500px; margin: 0 auto; padding: 18px 20px; }
+.topbar { flex-wrap: wrap; gap: 8px; }
+.nav-tabs { overflow-x: auto; white-space: nowrap; }
+.card { padding: 18px 20px; min-width: 0; }
+.card table { width: 100%; }
+th, td { padding: 10px 12px; text-align: left; vertical-align: middle; }
+
+/* Tables scroll sideways inside their card instead of being crushed */
+#store-table, #history-table, #restock-history-table,
+#report-profit-table, #report-transfer-table, #report-returns-table,
+#issue-list, #past-list, #lorry-stock-table,
+#lorry-expenses-list, #profit-report-saleslist { overflow-x: auto; }
+
+/* Lorry page: two columns on wide screens, one on phones/tablets */
+.grid.lorry-layout { grid-template-columns: 1fr 1fr; gap: 18px; }
+.lorry-layout > div { min-width: 0; }
+
+/* Store page */
+.store-layout > div { min-width: 0; }
+
+@media (max-width: 900px) {
+  .grid.lorry-layout { grid-template-columns: 1fr; }
+  .container { padding: 14px 12px; }
+  .card { padding: 14px 14px; }
+  th, td { padding: 8px 8px; font-size: 0.88rem; }
+}
+
+/* ── POS-STYLE SCROLLING LISTS (store + lorry) ───────────────
+   One row per product, no wrapped prices; the list scrolls inside
+   its card with a fixed header, and swipes sideways on phones. */
+#store-table { max-height: 75vh; overflow: auto; -webkit-overflow-scrolling: touch; }
+#store-table table { width: 100%; min-width: 640px; }
+#store-table th { position: sticky; top: 0; z-index: 1; background: #eef1f5; font-size: 0.72rem; letter-spacing: 0.5px; text-transform: uppercase; }
+#store-table td, #store-table th { white-space: nowrap; }
+#store-table td:first-child { white-space: normal; min-width: 190px; }
+
+#issue-list table, #past-list table { min-width: 480px; }
+#lorry-stock-table table { min-width: 400px; }
+#history-table table, #restock-history-table table { min-width: 440px; }
+#history-table td, #restock-history-table td { vertical-align: top; }
+#issue-list th, #past-list th { position: sticky; top: 0; background: #eef1f5; z-index: 1; }
