@@ -55,6 +55,9 @@
     margin-top: 4px;
   }
   .ledger-profit-row .ledger-profit-num { font-weight: 800; }
+  .report-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .report-toolbar .field { margin:0; }
+  .report-toolbar button { white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -164,10 +167,28 @@
 
         <div class="card">
           <h3 style="margin-top:0;">📊 Lorry Profit Report</h3>
-          <div class="field" style="max-width:220px;">
-            <label>Date</label>
-            <input type="date" id="profit-report-date">
+
+          <!-- Date range + quick ranges -->
+          <div class="report-toolbar">
+            <div class="field" style="max-width:170px;">
+              <label>From</label>
+              <input type="date" id="profit-report-from">
+            </div>
+            <div class="field" style="max-width:170px;">
+              <label>To</label>
+              <input type="date" id="profit-report-date">
+            </div>
+            <div class="field"><button class="secondary" onclick="setQuickRange('today')">Today</button></div>
+            <div class="field"><button class="secondary" onclick="setQuickRange('week')">This Week</button></div>
+            <div class="field"><button class="secondary" onclick="setQuickRange('month')">This Month</button></div>
           </div>
+
+          <!-- Export -->
+          <div class="report-toolbar">
+            <div class="field"><button class="secondary" onclick="downloadProfitReport()">⬇️ Download CSV</button></div>
+            <div class="field"><button class="secondary" onclick="printProfitReport()">🖨 Print / Save PDF</button></div>
+          </div>
+
           <div id="profit-report-summary"></div>
           <div id="profit-report-breakdown" style="margin-top:10px;"></div>
 
@@ -196,7 +217,7 @@
                 <button onclick="addLorryExpense()">Add Expense</button>
               </div>
             </div>
-            <p style="margin-bottom:0; opacity:0.7; font-size:0.85em;">Recorded against the date selected above.</p>
+            <p style="margin-bottom:0; opacity:0.7; font-size:0.85em;">Recorded against the <b>To</b> date selected above.</p>
             <div id="lorry-expenses-list" style="margin-top:10px;"></div>
           </div>
 
@@ -216,6 +237,7 @@
     let storeProducts = [];
     let closeRoutePrices = {}; // { store_product_id: price } — user overrides for close-route selling price
     let issueSelection = {};   // { store_product_id: qty } — products ticked for loading onto the lorry
+    let currentReport = null;  // data behind the report currently on screen (used by Download / Print)
 
     (async () => {
       currentStaff = await requireAuth(['admin','store_staff','lorry_seller']);
@@ -226,9 +248,11 @@
       if (!['admin','store_staff'].includes(currentStaff.role)) {
         document.getElementById('issue-card').style.display = 'none';
       }
+      document.getElementById('profit-report-from').value = todayDateInputValue();
       document.getElementById('profit-report-date').value = todayDateInputValue();
       document.getElementById('past-sale-date').value = todayDateInputValue();
       if (currentStaff.role === 'lorry_seller') document.getElementById('backdate-card').style.display = 'none';
+      document.getElementById('profit-report-from').addEventListener('change', loadProfitReport);
       document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
       loadProfitReport();
@@ -528,9 +552,17 @@
       alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — removed from lorry, not added back to store stock.');
     }
 
-    // ─── LORRY PROFIT REPORT (from lorry_sales — revenue, cost, profit for a chosen day) ──
+    // ─── LORRY PROFIT REPORT (from lorry_sales — revenue, cost, profit for a chosen day or date range) ──
+    // Local-date helper (avoids the UTC shift that toISOString() causes around midnight in Kenya)
+    function localISO(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
     function todayDateInputValue() {
-      return new Date().toISOString().slice(0, 10);
+      return localISO(new Date());
     }
 
     // "YYYY-MM-DD" -> "D/M/YYYY", matching the ledger's handwritten date style
@@ -539,12 +571,73 @@
       return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
     }
 
+    function rangeLabel(from, to) {
+      return from === to ? formatLedgerDate(from) : `${formatLedgerDate(from)} – ${formatLedgerDate(to)}`;
+    }
+
+    function setQuickRange(kind) {
+      const now = new Date();
+      let from = new Date(now);
+      if (kind === 'week') {
+        const dow = (now.getDay() + 6) % 7; // Monday = 0
+        from.setDate(now.getDate() - dow);
+      } else if (kind === 'month') {
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      document.getElementById('profit-report-from').value = localISO(from);
+      document.getElementById('profit-report-date').value = localISO(now);
+      loadProfitReport();
+    }
+
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Time only for a single day; "D/M HH:MM" when the report spans several days
+    function fmtStamp(iso, multi) {
+      if (!multi) return fmtTime(iso);
+      const dt = new Date(iso);
+      return `${dt.getDate()}/${dt.getMonth() + 1} ${fmtTime(iso)}`;
+    }
+
+    function saleLabel(s) {
+      const p = s.store_products;
+      return [p?.size, p?.name || s.product_name, p?.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
+    }
+
+    function byProductLabel(d) {
+      return [d.size !== '—' ? d.size : '', d.product, d.density !== '—' ? d.density : '', d.brand !== '—' ? d.brand : ''].filter(Boolean).join(' ');
+    }
+
+    // Per-day totals (used in the printout and CSV when the range spans more than one day)
+    function buildDaily(sales, expenses) {
+      const dayKey = iso => localISO(new Date(iso));
+      const map = {};
+      const slot = k => (map[k] = map[k] || { revenue: 0, cost: 0, items: 0, expenses: 0 });
+      sales.forEach(s => {
+        const o = slot(dayKey(s.created_at));
+        o.revenue += s.quantity * s.unit_price;
+        o.cost += s.quantity * (s.unit_cost ?? s.store_products?.cost ?? 0);
+        o.items += Number(s.quantity);
+      });
+      expenses.forEach(e => { slot(dayKey(e.created_at)).expenses += Number(e.amount); });
+      return Object.keys(map).sort().map(k => ({ day: k, ...map[k], profit: map[k].revenue - map[k].cost, net: map[k].revenue - map[k].cost - map[k].expenses }));
+    }
+
     async function loadProfitReport() {
-      const dateInput = document.getElementById('profit-report-date');
-      if (!dateInput.value) dateInput.value = todayDateInputValue();
-      const day = dateInput.value;
-      const start = `${day}T00:00:00`;
-      const end = `${day}T23:59:59.999`;
+      const fromInput = document.getElementById('profit-report-from');
+      const toInput = document.getElementById('profit-report-date');
+      if (!toInput.value) toInput.value = todayDateInputValue();
+      if (!fromInput.value) fromInput.value = toInput.value;
+      // If From is after To, pull From back to To so the range is always valid
+      if (fromInput.value > toInput.value) fromInput.value = toInput.value;
+
+      const fromDay = fromInput.value;
+      const toDay = toInput.value;
+      const multi = fromDay !== toDay;
+      const label = rangeLabel(fromDay, toDay);
+      const start = `${fromDay}T00:00:00`;
+      const end = `${toDay}T23:59:59.999`;
 
       const summaryEl = document.getElementById('profit-report-summary');
       const breakdownEl = document.getElementById('profit-report-breakdown');
@@ -552,6 +645,7 @@
       summaryEl.innerHTML = '<div class="empty-state">Loading...</div>';
       breakdownEl.innerHTML = '';
       salesListEl.innerHTML = '';
+      currentReport = null;
 
       if (!navigator.onLine) {
         summaryEl.innerHTML = '<div class="empty-state">Profit report needs internet.</div>';
@@ -585,15 +679,20 @@
       const sales = data || [];
       const expenses = expenseData || [];
       const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-      renderLorryExpensesList(expenses);
+      renderLorryExpensesList(expenses, multi);
 
       if (!sales.length) {
+        currentReport = {
+          fromDay, toDay, multi, label, sales: [], expenses, byProduct: {},
+          revenue: 0, cost: 0, itemsSold: 0, profit: 0, totalExpenses, netProfit: -totalExpenses,
+          daily: buildDaily([], expenses)
+        };
         if (!totalExpenses) {
-          summaryEl.innerHTML = '<div class="empty-state">No sales recorded for this day.</div>';
+          summaryEl.innerHTML = `<div class="empty-state">No sales recorded for ${multi ? 'this period' : 'this day'}.</div>`;
           return;
         }
         summaryEl.innerHTML = `
-          <div class="empty-state" style="margin-bottom:10px;">No sales recorded for this day.</div>
+          <div class="empty-state" style="margin-bottom:10px;">No sales recorded for ${multi ? 'this period' : 'this day'}.</div>
           <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px;">
             <div>
               <div style="color:var(--muted); font-size:0.75rem;">Expenses</div>
@@ -661,18 +760,25 @@
         byProduct[key].cost += s.quantity * (s.unit_cost ?? p?.cost ?? 0);
       });
 
+      // Keep everything the Download / Print buttons need
+      currentReport = {
+        fromDay, toDay, multi, label, sales, expenses, byProduct,
+        revenue, cost, itemsSold, profit, totalExpenses, netProfit,
+        daily: buildDaily(sales, expenses)
+      };
+
       breakdownEl.innerHTML = `
         <div class="ledger-summary">
-          <div class="ledger-title">Summary ${formatLedgerDate(day)}</div>
+          <div class="ledger-title">Summary ${label}</div>
           ${Object.values(byProduct).map(d => {
-            const label = [d.size, d.density, d.brand !== '—' ? d.brand : ''].filter(Boolean).join(' ');
+            const lbl = [d.size, d.density, d.brand !== '—' ? d.brand : ''].filter(Boolean).join(' ');
             // Unit prices can vary sale-to-sale (price changes over time); show the
             // average for display while the per-sale totals underneath stay exact.
             const sellUnit = d.qty ? Math.round(d.revenue / d.qty) : 0;
             const costUnit = d.qty ? Math.round(d.cost / d.qty) : 0;
             return `
               <div class="ledger-line">
-                <span class="ledger-label">- ${escapeHtml(label)}</span>
+                <span class="ledger-label">- ${escapeHtml(lbl)}</span>
                 <span class="ledger-calc">${d.qty} x ${sellUnit.toLocaleString()}<span class="arrow">→</span>${Math.round(d.revenue).toLocaleString()}</span>
                 <span class="ledger-calc">${d.qty} x ${costUnit.toLocaleString()}<span class="arrow">→</span>${Math.round(d.cost).toLocaleString()}</span>
               </div>`;
@@ -704,27 +810,155 @@
       salesListEl.innerHTML = `
         <h4 style="margin-bottom:6px;">Sales List</h4>
         <table>
-          <thead><tr><th>Time</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th>${currentStaff.role === 'admin' ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>${multi ? 'Date / Time' : 'Time'}</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th>${currentStaff.role === 'admin' ? '<th></th>' : ''}</tr></thead>
           <tbody>
-            ${sales.map(s => {
-              const p = s.store_products;
-              const time = new Date(s.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-              const name = [p?.size, p?.name || s.product_name, p?.manufacturer ? `— ${p.manufacturer}` : ''].filter(Boolean).join(' ').trim();
-              return `
+            ${sales.map(s => `
                 <tr>
-                  <td>${time}</td>
-                  <td>${escapeHtml(name)}</td>
+                  <td>${fmtStamp(s.created_at, multi)}</td>
+                  <td>${escapeHtml(saleLabel(s))}</td>
                   <td>${s.quantity}</td>
                   <td>Ksh ${Number(s.unit_price).toLocaleString()}</td>
                   <td>Ksh ${(Number(s.unit_price) * Number(s.quantity)).toLocaleString()}</td>
                   <td>${escapeHtml(s.customer_name || 'Walk-in')}</td>
                   <td>${escapeHtml(s.payment_method || '—')}</td>
                   ${currentStaff.role === 'admin' ? `<td><button class="secondary" onclick="deleteLorrySale('${s.id}')">Delete</button></td>` : ''}
-                </tr>`;
-            }).join('')}
+                </tr>`).join('')}
           </tbody>
         </table>
       `;
+    }
+
+
+    // ─── DOWNLOAD (CSV) / PRINT the report currently on screen ──
+    function csvCell(v) {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }
+
+    function downloadProfitReport() {
+      if (!currentReport) { alert('No report loaded yet. Pick the dates and wait for the report to appear.'); return; }
+      const r = currentReport;
+      const showCost = currentStaff.role === 'admin'; // cost/profit are admin-only elsewhere in the app
+      const lines = [];
+      const row = (...cells) => lines.push(cells.map(csvCell).join(','));
+
+      row('Thuku Store & Lorry - Lorry Profit Report');
+      row('Period', r.label);
+      row();
+      row('SUMMARY');
+      row('Revenue', Math.round(r.revenue));
+      if (showCost) row('Cost', Math.round(r.cost));
+      row('Items Sold', r.itemsSold);
+      if (showCost) row('Profit', Math.round(r.profit));
+      row('Expenses', Math.round(r.totalExpenses));
+      if (showCost) row('Net Profit', Math.round(r.netProfit));
+
+      if (r.multi && r.daily.length) {
+        row();
+        row('BY DAY');
+        row(...['Date', 'Items', 'Revenue', ...(showCost ? ['Cost', 'Profit'] : []), 'Expenses', ...(showCost ? ['Net Profit'] : [])]);
+        r.daily.forEach(d => row(...[formatLedgerDate(d.day), d.items, Math.round(d.revenue), ...(showCost ? [Math.round(d.cost), Math.round(d.profit)] : []), Math.round(d.expenses), ...(showCost ? [Math.round(d.net)] : [])]));
+      }
+
+      row();
+      row('BY PRODUCT');
+      row(...['Product', 'Qty', 'Revenue', ...(showCost ? ['Cost', 'Profit'] : [])]);
+      Object.values(r.byProduct).forEach(d => {
+        row(...[byProductLabel(d), d.qty, Math.round(d.revenue), ...(showCost ? [Math.round(d.cost), Math.round(d.revenue - d.cost)] : [])]);
+      });
+
+      row();
+      row('SALES LIST');
+      row('Date', 'Time', 'Product', 'Qty', 'Unit Price', 'Total', 'Customer', 'Payment');
+      r.sales.forEach(s => {
+        row(formatLedgerDate(localISO(new Date(s.created_at))), fmtTime(s.created_at), saleLabel(s), s.quantity, s.unit_price,
+            Number(s.unit_price) * Number(s.quantity), s.customer_name || 'Walk-in', s.payment_method || '');
+      });
+
+      row();
+      row('EXPENSES');
+      row('Date', 'Time', 'Category', 'Description', 'Amount');
+      r.expenses.forEach(e => {
+        row(formatLedgerDate(localISO(new Date(e.created_at))), fmtTime(e.created_at), e.category, e.description || '', e.amount);
+      });
+
+      // BOM so Excel reads UTF-8 correctly
+      const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = r.multi ? `lorry-profit-report-${r.fromDay}_to_${r.toDay}.csv` : `lorry-profit-report-${r.fromDay}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function printProfitReport() {
+      if (!currentReport) { alert('No report loaded yet. Pick the dates and wait for the report to appear.'); return; }
+      const r = currentReport;
+      const ksh = n => 'Ksh ' + Math.round(n).toLocaleString();
+      const showCost = currentStaff.role === 'admin'; // cost/profit are admin-only elsewhere in the app
+
+      const dailyRows = r.daily.map(d => `
+        <tr><td>${formatLedgerDate(d.day)}</td><td class="n">${d.items}</td><td class="n">${ksh(d.revenue)}</td>
+        ${showCost ? `<td class="n">${ksh(d.cost)}</td><td class="n">${ksh(d.profit)}</td>` : ''}
+        <td class="n">${ksh(d.expenses)}</td>${showCost ? `<td class="n">${ksh(d.net)}</td>` : ''}</tr>`).join('');
+
+      const productRows = Object.values(r.byProduct).map(d => `
+        <tr><td>${escapeHtml(byProductLabel(d))}</td><td class="n">${d.qty}</td><td class="n">${ksh(d.revenue)}</td>
+        ${showCost ? `<td class="n">${ksh(d.cost)}</td><td class="n">${ksh(d.revenue - d.cost)}</td>` : ''}</tr>`).join('');
+
+      const saleRows = r.sales.map(s => `
+        <tr><td>${fmtStamp(s.created_at, r.multi)}</td><td>${escapeHtml(saleLabel(s))}</td><td class="n">${s.quantity}</td>
+        <td class="n">${ksh(s.unit_price)}</td><td class="n">${ksh(Number(s.unit_price) * Number(s.quantity))}</td>
+        <td>${escapeHtml(s.customer_name || 'Walk-in')}</td><td>${escapeHtml(s.payment_method || '—')}</td></tr>`).join('');
+
+      const expenseRows = r.expenses.map(e => `
+        <tr><td>${fmtStamp(e.created_at, r.multi)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description || '—')}</td><td class="n">${ksh(e.amount)}</td></tr>`).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <title>Lorry Profit Report ${r.label}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color:#111; margin:24px; font-size:12px; }
+          h1 { font-size:20px; margin:0 0 2px; } h2 { font-size:14px; margin:18px 0 6px; }
+          .sub { color:#555; margin-bottom:14px; }
+          .kpis { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:6px; }
+          .kpi b { display:block; font-size:15px; }
+          table { width:100%; border-collapse:collapse; page-break-inside:auto; }
+          tr { page-break-inside:avoid; }
+          th, td { border:1px solid #bbb; padding:5px 7px; text-align:left; }
+          th { background:#eee; } td.n { text-align:right; white-space:nowrap; }
+          @media print { body { margin:10mm; } }
+        </style></head><body>
+        <h1>Thuku Store &amp; Lorry — Lorry Profit Report</h1>
+        <div class="sub">Period: <b>${r.label}</b> &nbsp;|&nbsp; Printed: ${new Date().toLocaleString('en-KE')} &nbsp;|&nbsp; By: ${escapeHtml(currentStaff.full_name)}</div>
+        <div class="kpis">
+          <div class="kpi">Revenue<b>${ksh(r.revenue)}</b></div>
+          ${showCost ? `<div class="kpi">Cost<b>${ksh(r.cost)}</b></div>` : ''}
+          <div class="kpi">Items Sold<b>${r.itemsSold}</b></div>
+          ${showCost ? `<div class="kpi">Profit<b>${ksh(r.profit)}</b></div>` : ''}
+          <div class="kpi">Expenses<b>${ksh(r.totalExpenses)}</b></div>
+          ${showCost ? `<div class="kpi">Net Profit<b>${ksh(r.netProfit)}</b></div>` : ''}
+        </div>
+        ${r.multi && dailyRows ? `<h2>Summary by Day</h2>
+          <table><thead><tr><th>Date</th><th>Items</th><th>Revenue</th>${showCost ? '<th>Cost</th><th>Profit</th>' : ''}<th>Expenses</th>${showCost ? '<th>Net Profit</th>' : ''}</tr></thead><tbody>${dailyRows}</tbody></table>` : ''}
+        ${productRows ? `<h2>Summary by Product</h2>
+          <table><thead><tr><th>Product</th><th>Qty</th><th>Revenue</th>${showCost ? '<th>Cost</th><th>Profit</th>' : ''}</tr></thead><tbody>${productRows}</tbody></table>` : ''}
+        ${saleRows ? `<h2>Sales List</h2>
+          <table><thead><tr><th>${r.multi ? 'Date / Time' : 'Time'}</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th></tr></thead><tbody>${saleRows}</tbody></table>` : '<p>No sales recorded for this period.</p>'}
+        ${expenseRows ? `<h2>Expenses</h2>
+          <table><thead><tr><th>${r.multi ? 'Date / Time' : 'Time'}</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead><tbody>${expenseRows}</tbody></table>` : ''}
+        </body></html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) { alert('Allow pop-ups for this site to print the report.'); return; }
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      let printed = false;
+      const doPrint = () => { if (printed) return; printed = true; w.focus(); w.print(); };
+      w.onload = doPrint;
+      setTimeout(doPrint, 600); // fallback if onload doesn't fire; the flag prevents a double print dialog
     }
 
 
@@ -830,6 +1064,8 @@
       document.getElementById('past-filter').value = '';
       document.getElementById('past-sale-customer').value = '';
       renderPastList();
+      // Show the report for the day just saved
+      document.getElementById('profit-report-from').value = day;
       document.getElementById('profit-report-date').value = day;
       await loadProfitReport();
       alert(`✅ ${rows.length} past sale(s) saved for ${formatLedgerDate(day)}.`);
@@ -845,33 +1081,31 @@
     function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str ?? ''; return d.innerHTML; }
     function escapeAttr(str) { return (str ?? '').replace(/"/g, '&quot;'); }
 
-    function renderLorryExpensesList(expenses) {
+    function renderLorryExpensesList(expenses, multi) {
       const listEl = document.getElementById('lorry-expenses-list');
       if (!expenses.length) {
-        listEl.innerHTML = '<div class="empty-state">No expenses recorded for this date.</div>';
+        listEl.innerHTML = `<div class="empty-state">No expenses recorded for ${multi ? 'this period' : 'this date'}.</div>`;
         return;
       }
       const canDelete = currentStaff.role === 'admin';
       listEl.innerHTML = `
         <table>
-          <thead><tr><th>Time</th><th>Category</th><th>Description</th><th>Amount</th>${canDelete ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>${multi ? 'Date / Time' : 'Time'}</th><th>Category</th><th>Description</th><th>Amount</th>${canDelete ? '<th></th>' : ''}</tr></thead>
           <tbody>
-            ${expenses.map(e => {
-              const time = new Date(e.created_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-              return `
+            ${expenses.map(e => `
                 <tr>
-                  <td>${time}</td>
+                  <td>${fmtStamp(e.created_at, multi)}</td>
                   <td>${escapeHtml(e.category)}</td>
                   <td>${escapeHtml(e.description || '—')}</td>
                   <td style="color:#c0392b; font-weight:600;">Ksh ${Number(e.amount).toLocaleString()}</td>
                   ${canDelete ? `<td><button class="secondary" onclick="deleteLorryExpense('${e.id}')">Delete</button></td>` : ''}
-                </tr>`;
-            }).join('')}
+                </tr>`).join('')}
           </tbody>
         </table>`;
     }
 
     async function addLorryExpense() {
+      // Expenses are recorded against the "To" date
       const dateInput = document.getElementById('profit-report-date');
       if (!dateInput.value) dateInput.value = todayDateInputValue();
       const day = dateInput.value;
@@ -886,7 +1120,7 @@
         return;
       }
 
-      // Record at the current time of day, but pinned to the selected report date
+      // Record at the current time of day, but pinned to the selected date
       const now = new Date();
       const [y, m, d] = day.split('-').map(Number);
       const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
