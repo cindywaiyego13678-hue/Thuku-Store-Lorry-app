@@ -9,14 +9,18 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f2137">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   .ledger-summary {
     font-family: 'Courier New', Consolas, monospace;
-    font-size: 0.85rem;
-    line-height: 1.55;
-    border: 1px solid var(--border, #33455c);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text, #000);
+    line-height: 1.7;
+    border: 2px solid var(--border, #33455c);
     border-radius: 8px;
-    padding: 14px 16px;
+    padding: 16px 18px;
     overflow-x: auto;
   }
   .ledger-title {
@@ -185,8 +189,8 @@
 
           <!-- Export -->
           <div class="report-toolbar">
-            <div class="field"><button class="secondary" onclick="downloadProfitReport()">⬇️ Download CSV</button></div>
-            <div class="field"><button class="secondary" onclick="printProfitReport()">🖨 Print / Save PDF</button></div>
+            <div class="field"><button class="secondary" onclick="downloadProfitReport()">⬇️ Download Summary (PDF)</button></div>
+            <div class="field"><button class="secondary" onclick="printProfitReport()">🖨 Print Summary</button></div>
           </div>
 
           <div id="profit-report-summary"></div>
@@ -223,6 +227,22 @@
 
           <div id="profit-report-saleslist" style="margin-top:16px;"></div>
         </div>
+        <div class="card" style="margin-top:18px;">
+          <h3 style="margin-top:0;">🗂 Download Summaries — one document per day</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Choose the dates, load the days, tick the ones you want, then download each day as its own summary PDF.</p>
+          <div class="report-toolbar">
+            <div class="field" style="max-width:170px;"><label>From</label><input type="date" id="bulk-from"></div>
+            <div class="field" style="max-width:170px;"><label>To</label><input type="date" id="bulk-to"></div>
+            <div class="field"><button onclick="loadBulkDays()">Load Days</button></div>
+          </div>
+          <div id="bulk-days"></div>
+          <div id="bulk-actions" style="display:none; gap:10px; flex-wrap:wrap; margin-top:12px;">
+            <button onclick="bulkDownloadFiles()">⬇️ Download each day as its own PDF</button>
+            <button class="secondary" onclick="bulkDownloadZip()">📦 Download all as one ZIP</button>
+            <button class="secondary" onclick="bulkPrint()">🖨 Print (one page per day)</button>
+          </div>
+          <p class="error-text" id="bulk-error" style="display:none;"></p>
+        </div>
       </div>
 
     </div>
@@ -251,6 +271,8 @@
       document.getElementById('profit-report-from').value = todayDateInputValue();
       document.getElementById('profit-report-date').value = todayDateInputValue();
       document.getElementById('past-sale-date').value = todayDateInputValue();
+      document.getElementById('bulk-from').value = todayDateInputValue();
+      document.getElementById('bulk-to').value = todayDateInputValue();
       if (currentStaff.role === 'lorry_seller') document.getElementById('backdate-card').style.display = 'none';
       document.getElementById('profit-report-from').addEventListener('change', loadProfitReport);
       document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
@@ -829,127 +851,172 @@
     }
 
 
-    // ─── DOWNLOAD (CSV) / PRINT the report currently on screen ──
-    function csvCell(v) {
-      const s = String(v ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    // ─── SUMMARY EXPORT: only the ledger-style summary (PDF download / print) ──
+    function canSeeCost() { return currentStaff && currentStaff.role === 'admin'; } // cost/profit are admin-only elsewhere in the app
+
+    const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+    function downloadBlob(blob, filename) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+
+    function summaryFileName(r) {
+      return r.multi ? `lorry-summary-${r.fromDay}_to_${r.toDay}.pdf` : `lorry-summary-${r.fromDay}.pdf`;
+    }
+
+    // One row per product, same wording as the on-screen ledger
+    function summaryRows(r) {
+      return Object.values(r.byProduct).map(d => {
+        let label = [d.size !== '—' ? d.size : '', d.density !== '—' ? d.density : '', d.brand !== '—' ? d.brand : ''].filter(Boolean).join(' ');
+        if (!label) label = d.product;
+        return {
+          label,
+          qty: d.qty,
+          sellUnit: d.qty ? Math.round(d.revenue / d.qty) : 0,
+          costUnit: d.qty ? Math.round(d.cost / d.qty) : 0,
+          revenue: Math.round(d.revenue),
+          cost: Math.round(d.cost)
+        };
+      });
+    }
+
+    // ── PDF (landscape A4, bold black Courier, large type) ──
+    function buildSummaryPdf(r) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+      const showCost = canSeeCost();
+      const n = v => Math.round(v).toLocaleString('en-US');
+      const L = 40, R = 802, SELL_X = 300, COST_X = 560, STEP = 20;
+      const periodText = r.label.replace('–', 'to');
+      let y = 54;
+
+      doc.setTextColor(0, 0, 0);
+      doc.setDrawColor(0, 0, 0);
+      doc.setFont('courier', 'bold');
+
+      doc.setFontSize(20);
+      doc.text('Thuku Store & Lorry', L, y); y += 26;
+      doc.setFontSize(17);
+      const title = `Summary ${periodText}`;
+      doc.text(title, L, y);
+      doc.setLineWidth(1.2);
+      doc.line(L, y + 4, L + doc.getTextWidth(title), y + 4);
+      y += 32;
+
+      doc.setFontSize(14);
+      const newPageIfNeeded = (need) => {
+        if (y + need > 555) { doc.addPage(); y = 54; doc.setFont('courier', 'bold'); doc.setFontSize(14); doc.setTextColor(0, 0, 0); }
+      };
+
+      // column headings
+      doc.text('Product', L, y);
+      doc.text('Selling', SELL_X, y);
+      if (showCost) doc.text('Cost', COST_X, y);
+      y += 6;
+      doc.setLineWidth(0.8);
+      doc.line(L, y, R, y);
+      y += STEP;
+
+      summaryRows(r).forEach(row => {
+        const lines = doc.splitTextToSize('- ' + row.label, SELL_X - L - 16);
+        newPageIfNeeded(lines.length * STEP);
+        doc.text(lines, L, y);
+        doc.text(`${row.qty} x ${n(row.sellUnit)} = ${n(row.revenue)}`, SELL_X, y);
+        if (showCost) doc.text(`${row.qty} x ${n(row.costUnit)} = ${n(row.cost)}`, COST_X, y);
+        y += lines.length * STEP;
+      });
+
+      // totals
+      newPageIfNeeded(110);
+      y += 4;
+      doc.setLineWidth(1);
+      doc.line(L, y, R, y);
+      y += STEP + 2;
+      doc.setFontSize(15);
+      doc.text(`${r.itemsSold} total`, L, y);
+      doc.text(n(r.revenue), SELL_X, y);
+      doc.line(SELL_X, y + 4, SELL_X + doc.getTextWidth(n(r.revenue)), y + 4);
+      if (showCost) {
+        doc.text(n(r.cost), COST_X, y);
+        doc.line(COST_X, y + 4, COST_X + doc.getTextWidth(n(r.cost)), y + 4);
+      }
+      y += STEP + 6;
+
+      if (showCost) {
+        doc.text('Profit', L, y);
+        doc.text(n(r.profit), SELL_X, y);
+        y += STEP + 2;
+      }
+      if (r.totalExpenses) {
+        doc.text('Expenses', L, y);
+        doc.text('-' + n(r.totalExpenses), showCost ? COST_X : SELL_X, y);
+        y += STEP + 2;
+        if (showCost) {
+          doc.text('Net Profit', L, y);
+          doc.text(n(r.netProfit), SELL_X, y);
+          y += STEP;
+        }
+      }
+
+      doc.setFontSize(10);
+      doc.text(`Printed ${new Date().toLocaleString('en-KE')} by ${currentStaff.full_name}`, L, 575);
+      return doc;
+    }
+
+    function ensurePdfLib() {
+      if (!window.jspdf || !window.jspdf.jsPDF) { alert('The PDF library did not load. Check your internet connection and refresh the page.'); return false; }
+      return true;
     }
 
     function downloadProfitReport() {
       if (!currentReport) { alert('No report loaded yet. Pick the dates and wait for the report to appear.'); return; }
-      const r = currentReport;
-      const showCost = currentStaff.role === 'admin'; // cost/profit are admin-only elsewhere in the app
-      const lines = [];
-      const row = (...cells) => lines.push(cells.map(csvCell).join(','));
-
-      row('Thuku Store & Lorry - Lorry Profit Report');
-      row('Period', r.label);
-      row();
-      row('SUMMARY');
-      row('Revenue', Math.round(r.revenue));
-      if (showCost) row('Cost', Math.round(r.cost));
-      row('Items Sold', r.itemsSold);
-      if (showCost) row('Profit', Math.round(r.profit));
-      row('Expenses', Math.round(r.totalExpenses));
-      if (showCost) row('Net Profit', Math.round(r.netProfit));
-
-      if (r.multi && r.daily.length) {
-        row();
-        row('BY DAY');
-        row(...['Date', 'Items', 'Revenue', ...(showCost ? ['Cost', 'Profit'] : []), 'Expenses', ...(showCost ? ['Net Profit'] : [])]);
-        r.daily.forEach(d => row(...[formatLedgerDate(d.day), d.items, Math.round(d.revenue), ...(showCost ? [Math.round(d.cost), Math.round(d.profit)] : []), Math.round(d.expenses), ...(showCost ? [Math.round(d.net)] : [])]));
-      }
-
-      row();
-      row('BY PRODUCT');
-      row(...['Product', 'Qty', 'Revenue', ...(showCost ? ['Cost', 'Profit'] : [])]);
-      Object.values(r.byProduct).forEach(d => {
-        row(...[byProductLabel(d), d.qty, Math.round(d.revenue), ...(showCost ? [Math.round(d.cost), Math.round(d.revenue - d.cost)] : [])]);
-      });
-
-      row();
-      row('SALES LIST');
-      row('Date', 'Time', 'Product', 'Qty', 'Unit Price', 'Total', 'Customer', 'Payment');
-      r.sales.forEach(s => {
-        row(formatLedgerDate(localISO(new Date(s.created_at))), fmtTime(s.created_at), saleLabel(s), s.quantity, s.unit_price,
-            Number(s.unit_price) * Number(s.quantity), s.customer_name || 'Walk-in', s.payment_method || '');
-      });
-
-      row();
-      row('EXPENSES');
-      row('Date', 'Time', 'Category', 'Description', 'Amount');
-      r.expenses.forEach(e => {
-        row(formatLedgerDate(localISO(new Date(e.created_at))), fmtTime(e.created_at), e.category, e.description || '', e.amount);
-      });
-
-      // BOM so Excel reads UTF-8 correctly
-      const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = r.multi ? `lorry-profit-report-${r.fromDay}_to_${r.toDay}.csv` : `lorry-profit-report-${r.fromDay}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      if (!ensurePdfLib()) return;
+      downloadBlob(buildSummaryPdf(currentReport).output('blob'), summaryFileName(currentReport));
     }
 
-    function printProfitReport() {
-      if (!currentReport) { alert('No report loaded yet. Pick the dates and wait for the report to appear.'); return; }
-      const r = currentReport;
-      const ksh = n => 'Ksh ' + Math.round(n).toLocaleString();
-      const showCost = currentStaff.role === 'admin'; // cost/profit are admin-only elsewhere in the app
+    // ── Print version (same summary, big bold black type) ──
+    const PRINT_CSS = `
+      body { font-family:'Courier New', Consolas, monospace; color:#000; margin:24px; font-size:17px; font-weight:700; }
+      h1 { font-size:22px; margin:0 0 4px; }
+      h2 { font-size:19px; margin:0 0 14px; text-decoration:underline; }
+      .line { display:grid; grid-template-columns:minmax(220px,1.3fr) 1fr 1fr; gap:16px; padding:3px 0; }
+      .head { border-bottom:2px solid #000; padding-bottom:6px; margin-bottom:6px; }
+      .totals { border-top:2px solid #000; margin-top:10px; padding-top:10px; font-size:19px; }
+      .totals .u { display:inline-block; border-bottom:3px solid #000; padding-bottom:2px; }
+      .foot { margin-top:30px; font-size:12px; font-weight:400; }
+      .report-page { page-break-after:always; }
+      .report-page:last-child { page-break-after:auto; }
+      @media print { body { margin:10mm; } }`;
 
-      const dailyRows = r.daily.map(d => `
-        <tr><td>${formatLedgerDate(d.day)}</td><td class="n">${d.items}</td><td class="n">${ksh(d.revenue)}</td>
-        ${showCost ? `<td class="n">${ksh(d.cost)}</td><td class="n">${ksh(d.profit)}</td>` : ''}
-        <td class="n">${ksh(d.expenses)}</td>${showCost ? `<td class="n">${ksh(d.net)}</td>` : ''}</tr>`).join('');
-
-      const productRows = Object.values(r.byProduct).map(d => `
-        <tr><td>${escapeHtml(byProductLabel(d))}</td><td class="n">${d.qty}</td><td class="n">${ksh(d.revenue)}</td>
-        ${showCost ? `<td class="n">${ksh(d.cost)}</td><td class="n">${ksh(d.revenue - d.cost)}</td>` : ''}</tr>`).join('');
-
-      const saleRows = r.sales.map(s => `
-        <tr><td>${fmtStamp(s.created_at, r.multi)}</td><td>${escapeHtml(saleLabel(s))}</td><td class="n">${s.quantity}</td>
-        <td class="n">${ksh(s.unit_price)}</td><td class="n">${ksh(Number(s.unit_price) * Number(s.quantity))}</td>
-        <td>${escapeHtml(s.customer_name || 'Walk-in')}</td><td>${escapeHtml(s.payment_method || '—')}</td></tr>`).join('');
-
-      const expenseRows = r.expenses.map(e => `
-        <tr><td>${fmtStamp(e.created_at, r.multi)}</td><td>${escapeHtml(e.category)}</td><td>${escapeHtml(e.description || '—')}</td><td class="n">${ksh(e.amount)}</td></tr>`).join('');
-
-      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-        <title>Lorry Profit Report ${r.label}</title>
-        <style>
-          body { font-family: Arial, sans-serif; color:#111; margin:24px; font-size:12px; }
-          h1 { font-size:20px; margin:0 0 2px; } h2 { font-size:14px; margin:18px 0 6px; }
-          .sub { color:#555; margin-bottom:14px; }
-          .kpis { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:6px; }
-          .kpi b { display:block; font-size:15px; }
-          table { width:100%; border-collapse:collapse; page-break-inside:auto; }
-          tr { page-break-inside:avoid; }
-          th, td { border:1px solid #bbb; padding:5px 7px; text-align:left; }
-          th { background:#eee; } td.n { text-align:right; white-space:nowrap; }
-          @media print { body { margin:10mm; } }
-        </style></head><body>
-        <h1>Thuku Store &amp; Lorry — Lorry Profit Report</h1>
-        <div class="sub">Period: <b>${r.label}</b> &nbsp;|&nbsp; Printed: ${new Date().toLocaleString('en-KE')} &nbsp;|&nbsp; By: ${escapeHtml(currentStaff.full_name)}</div>
-        <div class="kpis">
-          <div class="kpi">Revenue<b>${ksh(r.revenue)}</b></div>
-          ${showCost ? `<div class="kpi">Cost<b>${ksh(r.cost)}</b></div>` : ''}
-          <div class="kpi">Items Sold<b>${r.itemsSold}</b></div>
-          ${showCost ? `<div class="kpi">Profit<b>${ksh(r.profit)}</b></div>` : ''}
-          <div class="kpi">Expenses<b>${ksh(r.totalExpenses)}</b></div>
-          ${showCost ? `<div class="kpi">Net Profit<b>${ksh(r.netProfit)}</b></div>` : ''}
+    function summarySectionHtml(r) {
+      const showCost = canSeeCost();
+      const n = v => Math.round(v).toLocaleString('en-US');
+      const rows = summaryRows(r).map(row => `
+        <div class="line"><span>- ${escapeHtml(row.label)}</span>
+        <span>${row.qty} x ${n(row.sellUnit)} = ${n(row.revenue)}</span>
+        ${showCost ? `<span>${row.qty} x ${n(row.costUnit)} = ${n(row.cost)}</span>` : '<span></span>'}</div>`).join('');
+      return `
+        <h1>Thuku Store &amp; Lorry</h1>
+        <h2>Summary ${r.label}</h2>
+        <div class="line head"><span>Product</span><span>Selling</span><span>${showCost ? 'Cost' : ''}</span></div>
+        ${rows || '<p>No sales recorded.</p>'}
+        <div class="totals">
+          <div class="line"><span>${r.itemsSold} total</span><span><span class="u">${n(r.revenue)}</span></span><span>${showCost ? `<span class="u">${n(r.cost)}</span>` : ''}</span></div>
+          ${showCost ? `<div class="line"><span>Profit</span><span>${n(r.profit)}</span><span></span></div>` : ''}
+          ${r.totalExpenses ? `<div class="line"><span>Expenses</span><span>${showCost ? '' : '-' + n(r.totalExpenses)}</span><span>${showCost ? '-' + n(r.totalExpenses) : ''}</span></div>` : ''}
+          ${showCost && r.totalExpenses ? `<div class="line"><span>Net Profit</span><span>${n(r.netProfit)}</span><span></span></div>` : ''}
         </div>
-        ${r.multi && dailyRows ? `<h2>Summary by Day</h2>
-          <table><thead><tr><th>Date</th><th>Items</th><th>Revenue</th>${showCost ? '<th>Cost</th><th>Profit</th>' : ''}<th>Expenses</th>${showCost ? '<th>Net Profit</th>' : ''}</tr></thead><tbody>${dailyRows}</tbody></table>` : ''}
-        ${productRows ? `<h2>Summary by Product</h2>
-          <table><thead><tr><th>Product</th><th>Qty</th><th>Revenue</th>${showCost ? '<th>Cost</th><th>Profit</th>' : ''}</tr></thead><tbody>${productRows}</tbody></table>` : ''}
-        ${saleRows ? `<h2>Sales List</h2>
-          <table><thead><tr><th>${r.multi ? 'Date / Time' : 'Time'}</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th></tr></thead><tbody>${saleRows}</tbody></table>` : '<p>No sales recorded for this period.</p>'}
-        ${expenseRows ? `<h2>Expenses</h2>
-          <table><thead><tr><th>${r.multi ? 'Date / Time' : 'Time'}</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead><tbody>${expenseRows}</tbody></table>` : ''}
-        </body></html>`;
+        <div class="foot">Printed ${new Date().toLocaleString('en-KE')} by ${escapeHtml(currentStaff.full_name)}</div>`;
+    }
 
+    function openPrintWindow(title, bodyHtml) {
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title><style>${PRINT_CSS}</style></head><body>${bodyHtml}</body></html>`;
       const w = window.open('', '_blank');
       if (!w) { alert('Allow pop-ups for this site to print the report.'); return; }
       w.document.open();
@@ -959,6 +1026,172 @@
       const doPrint = () => { if (printed) return; printed = true; w.focus(); w.print(); };
       w.onload = doPrint;
       setTimeout(doPrint, 600); // fallback if onload doesn't fire; the flag prevents a double print dialog
+    }
+
+    function printProfitReport() {
+      if (!currentReport) { alert('No report loaded yet. Pick the dates and wait for the report to appear.'); return; }
+      openPrintWindow(`Lorry Summary ${currentReport.label}`, `<div class="report-page">${summarySectionHtml(currentReport)}</div>`);
+    }
+
+
+    // ─── BULK EXPORT: pick a date range, tick the days, get one summary document per day ──
+    let bulkDays = [];       // [{ day, sales, expenses }] — only days that have sales or expenses
+    let bulkSelected = {};   // { 'YYYY-MM-DD': true }
+
+    function buildProductGroups(sales) {
+      const byProduct = {};
+      sales.forEach(s => {
+        const p = s.store_products;
+        const key = s.store_product_id || s.product_name || 'unknown';
+        if (!byProduct[key]) {
+          byProduct[key] = {
+            brand: p?.manufacturer || '—', product: p?.name || s.product_name || 'Unknown',
+            size: p?.size || '—', density: p?.density || '—', qty: 0, revenue: 0, cost: 0
+          };
+        }
+        byProduct[key].qty += Number(s.quantity);
+        byProduct[key].revenue += s.quantity * s.unit_price;
+        byProduct[key].cost += s.quantity * (s.unit_cost ?? p?.cost ?? 0);
+      });
+      return byProduct;
+    }
+
+    function makeDayReport(day, sales, expenses) {
+      const revenue = sales.reduce((sum, s) => sum + (s.quantity * s.unit_price), 0);
+      const cost = sales.reduce((sum, s) => sum + (s.quantity * (s.unit_cost ?? s.store_products?.cost ?? 0)), 0);
+      const itemsSold = sales.reduce((sum, s) => sum + Number(s.quantity), 0);
+      const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      const profit = revenue - cost;
+      return {
+        fromDay: day, toDay: day, multi: false, label: formatLedgerDate(day),
+        sales, expenses, byProduct: buildProductGroups(sales),
+        revenue, cost, itemsSold, profit, totalExpenses, netProfit: profit - totalExpenses
+      };
+    }
+
+    function bulkError(msg) {
+      const el = document.getElementById('bulk-error');
+      el.textContent = msg || '';
+      el.style.display = msg ? 'block' : 'none';
+    }
+
+    async function loadBulkDays() {
+      bulkError('');
+      const from = document.getElementById('bulk-from').value;
+      const to = document.getElementById('bulk-to').value;
+      const listEl = document.getElementById('bulk-days');
+      document.getElementById('bulk-actions').style.display = 'none';
+      if (!from || !to) return bulkError('Pick both a From and a To date.');
+      if (from > to) return bulkError('The From date must be on or before the To date.');
+      if (!navigator.onLine) return bulkError('Bulk export needs internet.');
+
+      listEl.innerHTML = '<div class="empty-state">Loading...</div>';
+      const start = `${from}T00:00:00`;
+      const end = `${to}T23:59:59.999`;
+
+      const { data: salesData, error: salesErr } = await supabaseClient
+        .from('lorry_sales')
+        .select('*, store_products(name, manufacturer, size, density, cost, price)')
+        .gte('created_at', start).lte('created_at', end)
+        .order('created_at', { ascending: true });
+      if (salesErr) { listEl.innerHTML = ''; return bulkError('Error loading sales: ' + salesErr.message); }
+
+      const { data: expData, error: expErr } = await supabaseClient
+        .from('expenses').select('*')
+        .gte('created_at', start).lte('created_at', end)
+        .order('created_at', { ascending: true });
+      if (expErr) { listEl.innerHTML = ''; return bulkError('Error loading expenses: ' + expErr.message); }
+
+      const map = {};
+      const slot = k => (map[k] = map[k] || { day: k, sales: [], expenses: [] });
+      (salesData || []).forEach(s => slot(localISO(new Date(s.created_at))).sales.push(s));
+      (expData || []).forEach(e => slot(localISO(new Date(e.created_at))).expenses.push(e));
+
+      bulkDays = Object.values(map).sort((a, b) => a.day.localeCompare(b.day));
+      bulkSelected = {};
+      bulkDays.forEach(d => { bulkSelected[d.day] = true; });
+      renderBulkDays();
+    }
+
+    function renderBulkDays() {
+      const listEl = document.getElementById('bulk-days');
+      const actionsEl = document.getElementById('bulk-actions');
+      if (!bulkDays.length) {
+        listEl.innerHTML = '<div class="empty-state">No sales or expenses found in that range.</div>';
+        actionsEl.style.display = 'none';
+        return;
+      }
+      const allChecked = bulkDays.every(d => bulkSelected[d.day]);
+      const selectedCount = bulkDays.filter(d => bulkSelected[d.day]).length;
+      listEl.innerHTML = `
+        <div style="max-height:300px; overflow-y:auto; border:1px solid var(--border, #e2e6ea); border-radius:8px;">
+          <table>
+            <thead><tr>
+              <th><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="bulkToggleAll(this.checked)"></th>
+              <th>Date</th><th>Items</th><th>Revenue</th><th>Expenses</th>
+            </tr></thead>
+            <tbody>
+              ${bulkDays.map(d => {
+                const items = d.sales.reduce((s, x) => s + Number(x.quantity), 0);
+                const rev = d.sales.reduce((s, x) => s + x.quantity * x.unit_price, 0);
+                const exp = d.expenses.reduce((s, x) => s + Number(x.amount), 0);
+                return `<tr>
+                  <td><input type="checkbox" ${bulkSelected[d.day] ? 'checked' : ''} onchange="bulkToggle('${d.day}', this.checked)"></td>
+                  <td>${formatLedgerDate(d.day)}</td><td>${items}</td>
+                  <td>Ksh ${Math.round(rev).toLocaleString()}</td><td>Ksh ${Math.round(exp).toLocaleString()}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p style="color:var(--muted); font-size:0.8rem; margin:6px 0 0;">${selectedCount} of ${bulkDays.length} day(s) selected. Days with no sales or expenses are skipped.</p>`;
+      actionsEl.style.display = 'flex';
+    }
+
+    function bulkToggle(day, checked) {
+      if (checked) bulkSelected[day] = true; else delete bulkSelected[day];
+      renderBulkDays();
+    }
+
+    function bulkToggleAll(checked) {
+      bulkSelected = {};
+      if (checked) bulkDays.forEach(d => { bulkSelected[d.day] = true; });
+      renderBulkDays();
+    }
+
+    function selectedDayReports() {
+      const days = bulkDays.filter(d => bulkSelected[d.day]);
+      if (!days.length) { bulkError('Tick at least one day.'); return null; }
+      bulkError('');
+      return days.map(d => makeDayReport(d.day, d.sales, d.expenses));
+    }
+
+    // One PDF per day, downloaded one after another
+    async function bulkDownloadFiles() {
+      const reports = selectedDayReports();
+      if (!reports || !ensurePdfLib()) return;
+      for (const r of reports) {
+        downloadBlob(buildSummaryPdf(r).output('blob'), summaryFileName(r));
+        await sleep(600); // small gap so the browser doesn't drop downloads
+      }
+    }
+
+    // Same one-PDF-per-day files, bundled into one ZIP (avoids the browser's "allow multiple downloads" prompt)
+    async function bulkDownloadZip() {
+      const reports = selectedDayReports();
+      if (!reports || !ensurePdfLib()) return;
+      if (typeof JSZip === 'undefined') return bulkError('ZIP library did not load. Check your connection, or use "Download each day as its own PDF".');
+      const zip = new JSZip();
+      reports.forEach(r => zip.file(summaryFileName(r), buildSummaryPdf(r).output('arraybuffer')));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      downloadBlob(blob, `lorry-summaries-${reports[0].fromDay}_to_${reports[reports.length - 1].fromDay}.zip`);
+    }
+
+    // One printable job, every selected day starts on its own page
+    function bulkPrint() {
+      const reports = selectedDayReports();
+      if (!reports) return;
+      openPrintWindow('Lorry Summaries', reports.map(r => `<div class="report-page">${summarySectionHtml(r)}</div>`).join(''));
     }
 
 
