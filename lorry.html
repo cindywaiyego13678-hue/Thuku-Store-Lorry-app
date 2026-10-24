@@ -172,19 +172,13 @@
         <div class="card">
           <h3 style="margin-top:0;">📊 Lorry Profit Report</h3>
 
-          <!-- Date range + quick ranges -->
+          <!-- Report date -->
           <div class="report-toolbar">
             <div class="field" style="max-width:170px;">
-              <label>From</label>
-              <input type="date" id="profit-report-from">
-            </div>
-            <div class="field" style="max-width:170px;">
-              <label>To</label>
+              <label>Date</label>
               <input type="date" id="profit-report-date">
             </div>
-            <div class="field"><button class="secondary" onclick="setQuickRange('today')">Today</button></div>
-            <div class="field"><button class="secondary" onclick="setQuickRange('week')">This Week</button></div>
-            <div class="field"><button class="secondary" onclick="setQuickRange('month')">This Month</button></div>
+            <div class="field"><button class="secondary" onclick="setToday()">Today</button></div>
           </div>
 
           <!-- Export -->
@@ -229,11 +223,11 @@
         </div>
         <div class="card" style="margin-top:18px;">
           <h3 style="margin-top:0;">🗂 Download Summaries — one document per day</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Choose the dates, load the days, tick the ones you want, then download each day as its own summary PDF.</p>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Pick a date and click Add. Repeat for every day you want, then download each day as its own summary PDF.</p>
           <div class="report-toolbar">
-            <div class="field" style="max-width:170px;"><label>From</label><input type="date" id="bulk-from"></div>
-            <div class="field" style="max-width:170px;"><label>To</label><input type="date" id="bulk-to"></div>
-            <div class="field"><button onclick="loadBulkDays()">Load Days</button></div>
+            <div class="field" style="max-width:170px;"><label>Date</label><input type="date" id="bulk-date"></div>
+            <div class="field"><button onclick="addBulkDate()">+ Add Date</button></div>
+            <div class="field"><button class="secondary" onclick="clearBulkDates()">Clear</button></div>
           </div>
           <div id="bulk-days"></div>
           <div id="bulk-actions" style="display:none; gap:10px; flex-wrap:wrap; margin-top:12px;">
@@ -268,13 +262,11 @@
       if (!['admin','store_staff'].includes(currentStaff.role)) {
         document.getElementById('issue-card').style.display = 'none';
       }
-      document.getElementById('profit-report-from').value = todayDateInputValue();
       document.getElementById('profit-report-date').value = todayDateInputValue();
       document.getElementById('past-sale-date').value = todayDateInputValue();
-      document.getElementById('bulk-from').value = todayDateInputValue();
-      document.getElementById('bulk-to').value = todayDateInputValue();
+      document.getElementById('bulk-date').value = todayDateInputValue();
+      renderBulkDates();
       if (currentStaff.role === 'lorry_seller') document.getElementById('backdate-card').style.display = 'none';
-      document.getElementById('profit-report-from').addEventListener('change', loadProfitReport);
       document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
       loadProfitReport();
@@ -597,17 +589,8 @@
       return from === to ? formatLedgerDate(from) : `${formatLedgerDate(from)} – ${formatLedgerDate(to)}`;
     }
 
-    function setQuickRange(kind) {
-      const now = new Date();
-      let from = new Date(now);
-      if (kind === 'week') {
-        const dow = (now.getDay() + 6) % 7; // Monday = 0
-        from.setDate(now.getDate() - dow);
-      } else if (kind === 'month') {
-        from = new Date(now.getFullYear(), now.getMonth(), 1);
-      }
-      document.getElementById('profit-report-from').value = localISO(from);
-      document.getElementById('profit-report-date').value = localISO(now);
+    function setToday() {
+      document.getElementById('profit-report-date').value = todayDateInputValue();
       loadProfitReport();
     }
 
@@ -647,17 +630,13 @@
     }
 
     async function loadProfitReport() {
-      const fromInput = document.getElementById('profit-report-from');
       const toInput = document.getElementById('profit-report-date');
       if (!toInput.value) toInput.value = todayDateInputValue();
-      if (!fromInput.value) fromInput.value = toInput.value;
-      // If From is after To, pull From back to To so the range is always valid
-      if (fromInput.value > toInput.value) fromInput.value = toInput.value;
 
-      const fromDay = fromInput.value;
+      const fromDay = toInput.value;
       const toDay = toInput.value;
-      const multi = fromDay !== toDay;
-      const label = rangeLabel(fromDay, toDay);
+      const multi = false;
+      const label = formatLedgerDate(fromDay);
       const start = `${fromDay}T00:00:00`;
       const end = `${toDay}T23:59:59.999`;
 
@@ -1035,8 +1014,7 @@
 
 
     // ─── BULK EXPORT: pick a date range, tick the days, get one summary document per day ──
-    let bulkDays = [];       // [{ day, sales, expenses }] — only days that have sales or expenses
-    let bulkSelected = {};   // { 'YYYY-MM-DD': true }
+    let bulkDates = [];      // chosen days, 'YYYY-MM-DD', kept sorted
 
     function buildProductGroups(sales) {
       const byProduct = {};
@@ -1075,100 +1053,75 @@
       el.style.display = msg ? 'block' : 'none';
     }
 
-    async function loadBulkDays() {
-      bulkError('');
-      const from = document.getElementById('bulk-from').value;
-      const to = document.getElementById('bulk-to').value;
+    function renderBulkDates() {
       const listEl = document.getElementById('bulk-days');
-      document.getElementById('bulk-actions').style.display = 'none';
-      if (!from || !to) return bulkError('Pick both a From and a To date.');
-      if (from > to) return bulkError('The From date must be on or before the To date.');
-      if (!navigator.onLine) return bulkError('Bulk export needs internet.');
+      document.getElementById('bulk-actions').style.display = bulkDates.length ? 'flex' : 'none';
+      if (!bulkDates.length) { listEl.innerHTML = '<div class="empty-state">No dates added yet.</div>'; return; }
+      listEl.innerHTML = `<div style="display:flex; gap:8px; flex-wrap:wrap;">${bulkDates.map(d => `
+        <span style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:2px solid var(--border, #33455c); border-radius:999px; font-weight:700;">
+          ${formatLedgerDate(d)}
+          <button class="secondary" style="padding:0 7px; line-height:1.4;" onclick="removeBulkDate('${d}')" title="Remove">✕</button>
+        </span>`).join('')}</div>
+        <p style="color:var(--muted); font-size:0.8rem; margin:6px 0 0;">${bulkDates.length} day(s) selected. Days with no sales or expenses are skipped.</p>`;
+    }
 
-      listEl.innerHTML = '<div class="empty-state">Loading...</div>';
-      const start = `${from}T00:00:00`;
-      const end = `${to}T23:59:59.999`;
+    function addBulkDate() {
+      bulkError('');
+      const d = document.getElementById('bulk-date').value;
+      if (!d) return bulkError('Pick a date first.');
+      if (!bulkDates.includes(d)) bulkDates.push(d);
+      bulkDates.sort();
+      renderBulkDates();
+    }
+
+    function removeBulkDate(d) {
+      bulkDates = bulkDates.filter(x => x !== d);
+      renderBulkDates();
+    }
+
+    function clearBulkDates() {
+      bulkDates = [];
+      bulkError('');
+      renderBulkDates();
+    }
+
+    // Fetch the chosen days in one go and build one report per day that has data
+    async function selectedDayReports() {
+      bulkError('');
+      if (!bulkDates.length) { bulkError('Add at least one date.'); return null; }
+      if (!navigator.onLine) { bulkError('Downloading summaries needs internet.'); return null; }
+
+      const start = `${bulkDates[0]}T00:00:00`;
+      const end = `${bulkDates[bulkDates.length - 1]}T23:59:59.999`;
 
       const { data: salesData, error: salesErr } = await supabaseClient
         .from('lorry_sales')
         .select('*, store_products(name, manufacturer, size, density, cost, price)')
         .gte('created_at', start).lte('created_at', end)
         .order('created_at', { ascending: true });
-      if (salesErr) { listEl.innerHTML = ''; return bulkError('Error loading sales: ' + salesErr.message); }
+      if (salesErr) { bulkError('Error loading sales: ' + salesErr.message); return null; }
 
       const { data: expData, error: expErr } = await supabaseClient
         .from('expenses').select('*')
         .gte('created_at', start).lte('created_at', end)
         .order('created_at', { ascending: true });
-      if (expErr) { listEl.innerHTML = ''; return bulkError('Error loading expenses: ' + expErr.message); }
+      if (expErr) { bulkError('Error loading expenses: ' + expErr.message); return null; }
 
       const map = {};
-      const slot = k => (map[k] = map[k] || { day: k, sales: [], expenses: [] });
-      (salesData || []).forEach(s => slot(localISO(new Date(s.created_at))).sales.push(s));
-      (expData || []).forEach(e => slot(localISO(new Date(e.created_at))).expenses.push(e));
+      bulkDates.forEach(d => { map[d] = { sales: [], expenses: [] }; });
+      (salesData || []).forEach(s => { const k = localISO(new Date(s.created_at)); if (map[k]) map[k].sales.push(s); });
+      (expData || []).forEach(e => { const k = localISO(new Date(e.created_at)); if (map[k]) map[k].expenses.push(e); });
 
-      bulkDays = Object.values(map).sort((a, b) => a.day.localeCompare(b.day));
-      bulkSelected = {};
-      bulkDays.forEach(d => { bulkSelected[d.day] = true; });
-      renderBulkDays();
-    }
-
-    function renderBulkDays() {
-      const listEl = document.getElementById('bulk-days');
-      const actionsEl = document.getElementById('bulk-actions');
-      if (!bulkDays.length) {
-        listEl.innerHTML = '<div class="empty-state">No sales or expenses found in that range.</div>';
-        actionsEl.style.display = 'none';
-        return;
-      }
-      const allChecked = bulkDays.every(d => bulkSelected[d.day]);
-      const selectedCount = bulkDays.filter(d => bulkSelected[d.day]).length;
-      listEl.innerHTML = `
-        <div style="max-height:300px; overflow-y:auto; border:1px solid var(--border, #e2e6ea); border-radius:8px;">
-          <table>
-            <thead><tr>
-              <th><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="bulkToggleAll(this.checked)"></th>
-              <th>Date</th><th>Items</th><th>Revenue</th><th>Expenses</th>
-            </tr></thead>
-            <tbody>
-              ${bulkDays.map(d => {
-                const items = d.sales.reduce((s, x) => s + Number(x.quantity), 0);
-                const rev = d.sales.reduce((s, x) => s + x.quantity * x.unit_price, 0);
-                const exp = d.expenses.reduce((s, x) => s + Number(x.amount), 0);
-                return `<tr>
-                  <td><input type="checkbox" ${bulkSelected[d.day] ? 'checked' : ''} onchange="bulkToggle('${d.day}', this.checked)"></td>
-                  <td>${formatLedgerDate(d.day)}</td><td>${items}</td>
-                  <td>Ksh ${Math.round(rev).toLocaleString()}</td><td>Ksh ${Math.round(exp).toLocaleString()}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-        <p style="color:var(--muted); font-size:0.8rem; margin:6px 0 0;">${selectedCount} of ${bulkDays.length} day(s) selected. Days with no sales or expenses are skipped.</p>`;
-      actionsEl.style.display = 'flex';
-    }
-
-    function bulkToggle(day, checked) {
-      if (checked) bulkSelected[day] = true; else delete bulkSelected[day];
-      renderBulkDays();
-    }
-
-    function bulkToggleAll(checked) {
-      bulkSelected = {};
-      if (checked) bulkDays.forEach(d => { bulkSelected[d.day] = true; });
-      renderBulkDays();
-    }
-
-    function selectedDayReports() {
-      const days = bulkDays.filter(d => bulkSelected[d.day]);
-      if (!days.length) { bulkError('Tick at least one day.'); return null; }
-      bulkError('');
-      return days.map(d => makeDayReport(d.day, d.sales, d.expenses));
+      const withData = bulkDates.filter(d => map[d].sales.length || map[d].expenses.length);
+      const skipped = bulkDates.filter(d => !withData.includes(d));
+      if (!withData.length) { bulkError('No sales or expenses found on the chosen date(s).'); return null; }
+      if (skipped.length) bulkError(`Skipped (nothing recorded): ${skipped.map(formatLedgerDate).join(', ')}`);
+      return withData.map(d => makeDayReport(d, map[d].sales, map[d].expenses));
     }
 
     // One PDF per day, downloaded one after another
     async function bulkDownloadFiles() {
-      const reports = selectedDayReports();
+      const reports = await selectedDayReports();
       if (!reports || !ensurePdfLib()) return;
       for (const r of reports) {
         downloadBlob(buildSummaryPdf(r).output('blob'), summaryFileName(r));
@@ -1178,7 +1131,7 @@
 
     // Same one-PDF-per-day files, bundled into one ZIP (avoids the browser's "allow multiple downloads" prompt)
     async function bulkDownloadZip() {
-      const reports = selectedDayReports();
+      const reports = await selectedDayReports();
       if (!reports || !ensurePdfLib()) return;
       if (typeof JSZip === 'undefined') return bulkError('ZIP library did not load. Check your connection, or use "Download each day as its own PDF".');
       const zip = new JSZip();
@@ -1188,8 +1141,8 @@
     }
 
     // One printable job, every selected day starts on its own page
-    function bulkPrint() {
-      const reports = selectedDayReports();
+    async function bulkPrint() {
+      const reports = await selectedDayReports();
       if (!reports) return;
       openPrintWindow('Lorry Summaries', reports.map(r => `<div class="report-page">${summarySectionHtml(r)}</div>`).join(''));
     }
@@ -1298,7 +1251,6 @@
       document.getElementById('past-sale-customer').value = '';
       renderPastList();
       // Show the report for the day just saved
-      document.getElementById('profit-report-from').value = day;
       document.getElementById('profit-report-date').value = day;
       await loadProfitReport();
       alert(`✅ ${rows.length} past sale(s) saved for ${formatLedgerDate(day)}.`);
