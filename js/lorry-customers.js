@@ -3,6 +3,8 @@
    One account per customer: every delivery (products, qty, price),
    every payment (cash / M-Pesa) and the credit balance, each with a date.
    Balance = total delivered − total paid.
+   Pick a customer to see each day's orders, cash / M-Pesa payments and credit,
+   and to record a credit payment (shows credit before → after).
    Saving a delivery also takes the stock off the lorry and records the
    sales, so the Profit Report stays correct.
    Requires lorry-customer-ledger.sql (run once in Supabase).
@@ -11,6 +13,7 @@
   let accounts = [];      // grouped customers
   let custQty = {}, custPrice = {};
   let deliveryTotal = 0;
+  let selectedKey = '';   // customer account currently open
 
   const money = (n) => 'Ksh ' + Math.round(Number(n) || 0).toLocaleString();
   const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -104,12 +107,16 @@
       <p class="error-text" id="past-err" style="display:none;"></p>
     </div>
 
-    <div class="field"><input type="text" id="cust-search" placeholder="Search customers..." autocomplete="off"></div>
-    <div id="cust-owed" style="margin:6px 0 10px; font-weight:800; color:#c0392b;"></div>
+    <div class="field"><label>Select customer account</label>
+      <select id="cust-pick" onchange="custPick()"><option value="">— Choose a customer —</option></select></div>
+    <div id="cust-owed" style="margin:2px 0 10px; font-weight:800; color:#c0392b;"></div>
+    <div id="cust-detail"></div>
     <div id="cust-list"><div class="empty-state">Loading...</div></div>
   `;
-  reportCard.parentNode.insertBefore(card, reportCard);
-  document.getElementById('cust-search').addEventListener('input', renderAccounts);
+  const leftCol = document.getElementById('close-route-payment').closest('.card').parentNode;
+  card.style.marginTop = '18px'; card.style.marginBottom = '0';
+  const bulkCard = document.getElementById('bulk-date') && document.getElementById('bulk-date').closest('.card');
+  if (bulkCard && bulkCard.parentNode === leftCol) leftCol.insertBefore(card, bulkCard); else leftCol.appendChild(card);
 
   window.custToggleForm = function () {
     const f = document.getElementById('cust-form');
@@ -219,9 +226,10 @@
     }];
     if (paid > 0) rows.push({
       customer_name: name, phone: phone || null, location: location || null, entry_type: 'payment',
-      amount: paid, method: via, staff_id: currentStaff.id, created_at: new Date(now.getTime() + 1000).toISOString()
+      amount: paid, method: via, paid_at_order: true, staff_id: currentStaff.id, created_at: new Date(now.getTime() + 1000).toISOString()
     });
     const { error: ledErr } = await supabaseClient.from('lorry_customer_ledger').insert(rows);
+    selectedKey = keyOf(name);
     okLines.forEach(l => { delete custQty[l.row.store_product_id]; delete custPrice[l.row.store_product_id]; });
 
     await Promise.all([loadLorryStock(), loadProfitReport()]);
@@ -261,81 +269,177 @@
     renderAccounts();
   };
 
-  function renderAccounts() {
-    const listEl = document.getElementById('cust-list');
-    const q = document.getElementById('cust-search').value.trim().toLowerCase();
-    const shown = accounts.filter(a => !q || a.name.toLowerCase().includes(q) || (a.phone || '').includes(q));
-    const owed = accounts.reduce((s, a) => s + Math.max(a.balance, 0), 0);
-    document.getElementById('cust-owed').textContent = accounts.length ? `Total owed by customers: ${money(owed)}` : '';
-    if (!shown.length) { listEl.innerHTML = `<div class="empty-state">${accounts.length ? 'No match.' : 'No customer accounts yet. Use + New Delivery.'}</div>`; return; }
+  window.custPick = function () { selectedKey = document.getElementById('cust-pick').value; renderAccounts(); };
+  window.custSelectIdx = function (i) {
+    if (!accounts[i]) return;
+    selectedKey = accounts[i].key;
+    renderAccounts();
+    document.getElementById('cust-pick').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
 
-    const canDelete = currentStaff && currentStaff.role === 'admin';
-    listEl.innerHTML = shown.map(a => {
-      let run = 0;
-      const sorted = a.entries.slice().sort((x, y) => new Date(x.created_at) - new Date(y.created_at) || (x.entry_type === 'delivery' ? -1 : 1));
-      const rows = sorted.map(e => {
-        const isDel = e.entry_type === 'delivery';
-        run += isDel ? Number(e.amount) : -Number(e.amount);
-        const details = isDel
-          ? (e.items || []).map(i => `${i.qty} × ${escapeHtml(i.name)} @ ${Math.round(i.price).toLocaleString()}`).join('<br>')
-          : 'Payment received';
-        return `<tr>
-          <td>${fmtDate(e.created_at)}</td>
-          <td>${details}</td>
-          <td>${isDel ? '—' : (e.method === 'mpesa' ? 'M-Pesa' : 'Cash')}</td>
-          <td>${isDel ? money(e.amount) : ''}</td>
-          <td style="color:#1a7f37;">${isDel ? '' : money(e.amount)}</td>
-          <td style="font-weight:700;">${money(run)}</td>
-          ${canDelete ? `<td><button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td>` : ''}
-        </tr>`;
-      }).join('');
-      const i = accounts.indexOf(a);
-      return `<details style="border:1px solid var(--border, #33455c); border-radius:8px; padding:10px 12px; margin-bottom:10px;">
-        <summary style="cursor:pointer; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;">
-          <span><b>${escapeHtml(a.name)}</b>
-            <span style="color:var(--muted); font-size:0.8rem;">${a.phone ? ' · 📞 ' + escapeHtml(a.phone) : ''}${a.location ? ' · 📍 ' + escapeHtml(a.location) : ''}</span></span>
-          <span style="font-weight:800; color:${a.balance > 0 ? '#c0392b' : '#1a7f37'};">${a.balance > 0 ? 'Owes ' + money(a.balance) : 'Cleared'}</span>
-        </summary>
-        <div style="margin-top:8px; font-size:0.85rem; color:var(--muted);">
-          Delivered ${money(a.delivered)} · Paid ${money(a.paid)} · Balance ${money(a.balance)}
-        </div>
-        <div style="overflow-x:auto;"><table style="margin-top:8px;">
-          <thead><tr><th>Date</th><th>Products / Details</th><th>Method</th><th>Delivered</th><th>Paid</th><th>Balance</th>${canDelete ? '<th></th>' : ''}</tr></thead>
-          <tbody>${rows}</tbody></table></div>
-        ${a.balance > 0 ? `<button style="margin-top:8px;" onclick="custRecordPayment(${i})">+ Record Payment</button>` : ''}
-      </details>`;
-    }).join('');
+  // Entries in order, each with the credit balance before and after it
+  function timeline(a) {
+    const sorted = a.entries.slice().sort((x, y) =>
+      new Date(x.created_at) - new Date(y.created_at) || (x.entry_type === 'delivery' ? -1 : 1));
+    let run = 0;
+    return sorted.map(e => {
+      const before = run;
+      run += e.entry_type === 'delivery' ? Number(e.amount) : -Number(e.amount);
+      return { e, before, after: run };
+    });
   }
 
-  // ─── RECORD PAYMENT (dated) ───
-  window.custRecordPayment = async function (i) {
-    const a = accounts[i];
+  // One row per day: what was ordered, cash / M-Pesa paid, credit added or reduced, credit left at day end
+  function dailyRows(tl) {
+    const days = {};
+    tl.forEach(({ e, after }) => {
+      const k = localISO(new Date(e.created_at));
+      const d = days[k] = days[k] || { day: k, items: [], ordered: 0, cash: 0, mpesa: 0, end: 0 };
+      if (e.entry_type === 'delivery') { d.ordered += Number(e.amount); (e.items || []).forEach(i => d.items.push(i)); }
+      else if (e.method === 'mpesa') d.mpesa += Number(e.amount);
+      else d.cash += Number(e.amount);
+      d.end = after;
+    });
+    return Object.values(days).sort((x, y) => x.day.localeCompare(y.day));
+  }
+
+  function detailHtml(a) {
+    const canDelete = currentStaff && currentStaff.role === 'admin';
+    const tl = timeline(a);
+    const days = dailyRows(tl);
+    const pays = a.entries.filter(e => e.entry_type === 'payment');
+    const cash = pays.filter(e => e.method !== 'mpesa').reduce((s, e) => s + Number(e.amount), 0);
+    const mpesa = pays.filter(e => e.method === 'mpesa').reduce((s, e) => s + Number(e.amount), 0);
+    const tile = (label, val, color) => `<div style="flex:1; min-width:110px; border:1px solid var(--border, #33455c); border-radius:8px; padding:8px 10px;">
+      <div style="color:var(--muted); font-size:0.75rem;">${label}</div>
+      <div style="font-weight:800; font-size:1.05rem;${color ? ' color:' + color + ';' : ''}">${val}</div></div>`;
+
+    const dayRows = days.map(d => {
+      const change = d.ordered - d.cash - d.mpesa;
+      const prods = d.items.map(i => `${i.qty} × ${escapeHtml(i.name)} @ ${Math.round(i.price).toLocaleString()}`).join('<br>') || '—';
+      const chg = change > 0 ? `<span style="color:#c0392b;">+${money(change)}<br><small>credit added</small></span>`
+        : change < 0 ? `<span style="color:#1a7f37;">−${money(-change)}<br><small>credit reduced</small></span>` : '—';
+      return `<tr>
+        <td>${fmtDate(d.day + 'T12:00:00')}</td><td>${prods}</td>
+        <td>${d.ordered ? money(d.ordered) : '—'}</td><td>${d.cash ? money(d.cash) : '—'}</td><td>${d.mpesa ? money(d.mpesa) : '—'}</td>
+        <td>${chg}</td><td style="font-weight:700;">${money(d.end)}</td></tr>`;
+    }).join('');
+
+    const creditPays = tl.filter(t => t.e.entry_type === 'payment' && !t.e.paid_at_order);
+    const paidTowardCredit = creditPays.reduce((s, t) => s + Number(t.e.amount), 0);
+    const payRows = creditPays.map(({ e, before, after }) => `<tr>
+      <td>${fmtDate(e.created_at)}</td><td>${e.method === 'mpesa' ? 'M-Pesa' : 'Cash'}</td>
+      <td style="color:#1a7f37; font-weight:700;">−${money(e.amount)}</td><td>${money(before)}</td>
+      <td style="font-weight:700;">${money(after)}</td>
+      ${canDelete ? `<td><button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td>` : ''}</tr>`).join('');
+
+    const payForm = a.balance > 0 ? `
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+        <div class="field" style="flex:1; min-width:120px;"><label>Amount paid (Ksh)</label>
+          <input type="number" id="cp-amt" min="0" step="any" placeholder="0" oninput="custPayPreview()"></div>
+        <div class="field" style="flex:1; min-width:110px;"><label>Paid via</label>
+          <select id="cp-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
+        <div class="field" style="flex:1; min-width:140px;"><label>Date paid</label>
+          <input type="date" id="cp-date" value="${todayDateInputValue()}"></div>
+      </div>
+      <div id="cp-preview" style="margin:4px 0 8px; font-weight:700;">Credit now: ${money(a.balance)}</div>
+      <button onclick="custPayCredit()" style="width:100%;">Record Credit Payment</button>
+      <p class="error-text" id="cp-err" style="display:none;"></p>`
+      : '<div style="color:#1a7f37; font-weight:700;">✅ No credit outstanding — this account is cleared.</div>';
+
+    const allEntries = canDelete ? `<details style="margin-top:10px;"><summary style="cursor:pointer; color:var(--muted); font-size:0.85rem;">All entries (admin — delete a wrong entry)</summary>
+      <table style="margin-top:6px;"><tbody>${tl.map(({ e }) => `<tr>
+        <td>${fmtDate(e.created_at)}</td><td>${e.entry_type === 'delivery' ? 'Delivery' : 'Payment'}</td><td>${money(e.amount)}</td>
+        <td><button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td></tr>`).join('')}</tbody></table></details>` : '';
+
+    return `<div style="border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
+      <div style="font-weight:800; font-size:1.05rem;">${escapeHtml(a.name)}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">${a.phone ? '📞 ' + escapeHtml(a.phone) : ''}${a.location ? ' · 📍 ' + escapeHtml(a.location) : ''}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        ${tile('Total ordered', money(a.delivered))}
+        ${tile('Paid — Cash', money(cash))}
+        ${tile('Paid — M-Pesa', money(mpesa))}
+        ${tile('Credit remaining', money(a.balance), a.balance > 0 ? '#c0392b' : '#1a7f37')}
+      </div>
+
+      <h4 style="margin:6px 0;">📅 Day by day</h4>
+      <div style="overflow-x:auto;"><table>
+        <thead><tr><th>Date</th><th>Products ordered</th><th>Ordered</th><th>Cash</th><th>M-Pesa</th><th>Credit change</th><th>Credit left</th></tr></thead>
+        <tbody>${dayRows}</tbody></table></div>
+
+      <h4 style="margin:14px 0 6px;">💳 Customer pays credit</h4>
+      ${payForm}
+
+      <h4 style="margin:14px 0 6px;">Credit payments made${creditPays.length ? ` — total ${money(paidTowardCredit)}` : ''}</h4>
+      ${creditPays.length
+        ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Method</th><th>Reduced by</th><th>Credit before</th><th>Credit after</th>${canDelete ? '<th></th>' : ''}</tr></thead><tbody>${payRows}</tbody></table></div>`
+        : '<div class="empty-state">No credit payments yet.</div>'}
+      <div style="margin-top:8px; font-weight:800;">Total credit remaining: <span style="color:${a.balance > 0 ? '#c0392b' : '#1a7f37'};">${money(a.balance)}</span></div>
+      ${allEntries}
+    </div>`;
+  }
+
+  function renderAccounts() {
+    const pick = document.getElementById('cust-pick');
+    pick.innerHTML = '<option value="">— Choose a customer —</option>' + accounts.map(a =>
+      `<option value="${escapeAttr(a.key)}">${escapeHtml(a.name)} — ${a.balance > 0 ? 'owes ' + money(a.balance) : 'cleared'}</option>`).join('');
+    if (!accounts.find(a => a.key === selectedKey)) selectedKey = '';
+    pick.value = selectedKey;
+
+    const owed = accounts.reduce((s, a) => s + Math.max(a.balance, 0), 0);
+    document.getElementById('cust-owed').textContent = accounts.length ? `Total credit owed by all customers: ${money(owed)}` : '';
+
+    const sel = accounts.find(a => a.key === selectedKey);
+    document.getElementById('cust-detail').innerHTML = sel ? detailHtml(sel) : '';
+
+    const listEl = document.getElementById('cust-list');
+    if (!accounts.length) { listEl.innerHTML = '<div class="empty-state">No customer accounts yet. Use + New Delivery or + Add Past Record.</div>'; return; }
+    listEl.innerHTML = `<h4 style="margin:10px 0 6px;">All customers <span style="font-weight:400; color:var(--muted); font-size:0.8rem;">(tap one to open it)</span></h4>
+      <div style="overflow-x:auto;"><table>
+        <thead><tr><th>Customer</th><th>Ordered</th><th>Paid</th><th>Credit left</th></tr></thead>
+        <tbody>${accounts.map((a, i) => `<tr style="cursor:pointer;${a.key === selectedKey ? ' font-weight:700;' : ''}" onclick="custSelectIdx(${i})">
+          <td>${escapeHtml(a.name)}</td><td>${money(a.delivered)}</td><td>${money(a.paid)}</td>
+          <td style="color:${a.balance > 0 ? '#c0392b' : '#1a7f37'}; font-weight:700;">${a.balance > 0 ? money(a.balance) : 'Cleared'}</td></tr>`).join('')}</tbody>
+      </table></div>`;
+  }
+
+  // ─── CUSTOMER PAYS CREDIT ───
+  window.custPayPreview = function () {
+    const a = accounts.find(x => x.key === selectedKey);
+    const el = document.getElementById('cp-preview');
+    if (!a || !el) return;
+    const amt = parseFloat(document.getElementById('cp-amt').value) || 0;
+    el.innerHTML = amt > 0
+      ? `Credit: ${money(a.balance)} → <span style="color:#1a7f37;">${money(a.balance - amt)}</span> (reduced by ${money(amt)})`
+      : `Credit now: ${money(a.balance)}`;
+  };
+
+  window.custPayCredit = async function () {
+    const a = accounts.find(x => x.key === selectedKey);
     if (!a) return;
-    const amtAns = prompt(`${a.name}\nBalance: ${money(a.balance)}\n\nAmount paid (Ksh):`, Math.round(a.balance));
-    if (amtAns === null) return;
-    const amount = parseFloat(amtAns);
-    if (isNaN(amount) || amount <= 0) { alert('Enter a valid amount.'); return; }
-    if (amount > a.balance) { alert(`That is more than the balance (${money(a.balance)}).`); return; }
+    const errEl = document.getElementById('cp-err');
+    errEl.style.display = 'none';
+    const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
 
-    const methAns = prompt('Paid by? Type: cash or mpesa', 'cash');
-    if (methAns === null) return;
-    const method = methAns.trim().toLowerCase();
-    if (!['cash', 'mpesa'].includes(method)) { alert('Please type cash or mpesa.'); return; }
+    const amount = parseFloat(document.getElementById('cp-amt').value);
+    const method = document.getElementById('cp-via').value;
+    const day = document.getElementById('cp-date').value;
+    if (!amount || amount <= 0) return showErr('Enter the amount paid.');
+    if (amount > a.balance) return showErr(`That is more than the credit remaining (${money(a.balance)}).`);
+    if (!day) return showErr('Pick the date paid.');
+    if (!navigator.onLine) return showErr('Recording a payment needs internet.');
 
-    const dateAns = prompt('Date paid (YYYY-MM-DD):', todayDateInputValue());
-    if (dateAns === null) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateAns.trim())) { alert('Use the format YYYY-MM-DD, e.g. 2026-11-20.'); return; }
-    const [y, m, d] = dateAns.trim().split('-').map(Number);
+    const [y, m, d] = day.split('-').map(Number);
     const now = new Date();
     const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
-    if (!navigator.onLine) { alert('Recording a payment needs internet.'); return; }
-
     const { error } = await supabaseClient.from('lorry_customer_ledger').insert([{
       customer_name: a.name, phone: a.phone || null, location: a.location || null,
-      entry_type: 'payment', amount, method, staff_id: currentStaff.id, created_at: createdAt
+      entry_type: 'payment', amount, method, paid_at_order: false, staff_id: currentStaff.id, created_at: createdAt
     }]);
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) return showErr('Error: ' + error.message);
+
     await loadCustomers();
+    alert(`✅ ${money(amount)} received from ${a.name}. Credit remaining: ${money(a.balance - amount)}.`);
   };
 
   window.custDeleteEntry = async function (id) {
@@ -344,7 +448,6 @@
     if (error) { alert('Error: ' + error.message); return; }
     await loadCustomers();
   };
-
 
   // ─── ADD PAST RECORD (back-dated; account only — no stock or Profit Report change) ───
   window.custTogglePast = function () {
@@ -433,11 +536,12 @@
       const paid = parseFloat(document.getElementById('past-del-paid').value) || 0;
       if (paid < 0 || paid > total) return showErr(`Paid on that day must be between 0 and ${money(total)}.`);
       rows.push({ ...common, entry_type: 'delivery', items: lines.map(l => ({ name: l.name, qty: l.qty, price: l.price })), amount: total, created_at: base.toISOString() });
-      if (paid > 0) rows.push({ ...common, entry_type: 'payment', amount: paid, method: document.getElementById('past-del-via').value, created_at: new Date(base.getTime() + 1000).toISOString() });
+      if (paid > 0) rows.push({ ...common, entry_type: 'payment', amount: paid, method: document.getElementById('past-del-via').value, paid_at_order: true, created_at: new Date(base.getTime() + 1000).toISOString() });
     }
 
     const { error } = await supabaseClient.from('lorry_customer_ledger').insert(rows);
     if (error) return showErr('Error: ' + error.message);
+    selectedKey = keyOf(name);
 
     // Clear for the next one but keep the customer so several old entries are quick to add
     document.getElementById('past-lines').innerHTML = '';
