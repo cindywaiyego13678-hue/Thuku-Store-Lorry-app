@@ -118,6 +118,23 @@
           <button onclick="closeRoute()" style="width:100%; background:#1a7f37;">✅ Close Route — Mark Remaining Stock as Sold</button>
           <p class="error-text" id="close-route-error" style="display:none;"></p>
         </div>
+
+        <div class="card" style="margin-top:18px;">
+          <h3 style="margin-top:0;">🗂 Download Summaries — one document per day</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Pick a date and click Add. Repeat for every day you want, then download each day as its own summary PDF.</p>
+          <div class="report-toolbar">
+            <div class="field" style="max-width:170px;"><label>Date</label><input type="date" id="bulk-date"></div>
+            <div class="field"><button onclick="addBulkDate()">+ Add Date</button></div>
+            <div class="field"><button class="secondary" onclick="clearBulkDates()">Clear</button></div>
+          </div>
+          <div id="bulk-days"></div>
+          <div id="bulk-actions" style="display:none; gap:10px; flex-wrap:wrap; margin-top:12px;">
+            <button onclick="bulkDownloadFiles()">⬇️ Download each day as its own PDF</button>
+            <button class="secondary" onclick="bulkDownloadZip()">📦 Download all as one ZIP</button>
+            <button class="secondary" onclick="bulkPrint()">🖨 Print (one page per day)</button>
+          </div>
+          <p class="error-text" id="bulk-error" style="display:none;"></p>
+        </div>
       </div>
 
       <!-- RIGHT: Returns + profit report -->
@@ -192,22 +209,6 @@
           <div id="profit-report-saleslist" style="margin-top:16px;"></div>
         </div>
         <!-- Weekly Expenses & Net Profit card is added here by js/lorry-weekly.js -->
-        <div class="card" style="margin-top:18px;">
-          <h3 style="margin-top:0;">🗂 Download Summaries — one document per day</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Pick a date and click Add. Repeat for every day you want, then download each day as its own summary PDF.</p>
-          <div class="report-toolbar">
-            <div class="field" style="max-width:170px;"><label>Date</label><input type="date" id="bulk-date"></div>
-            <div class="field"><button onclick="addBulkDate()">+ Add Date</button></div>
-            <div class="field"><button class="secondary" onclick="clearBulkDates()">Clear</button></div>
-          </div>
-          <div id="bulk-days"></div>
-          <div id="bulk-actions" style="display:none; gap:10px; flex-wrap:wrap; margin-top:12px;">
-            <button onclick="bulkDownloadFiles()">⬇️ Download each day as its own PDF</button>
-            <button class="secondary" onclick="bulkDownloadZip()">📦 Download all as one ZIP</button>
-            <button class="secondary" onclick="bulkPrint()">🖨 Print (one page per day)</button>
-          </div>
-          <p class="error-text" id="bulk-error" style="display:none;"></p>
-        </div>
       </div>
 
     </div>
