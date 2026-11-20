@@ -27,6 +27,7 @@
       <h3 style="margin:0;">👥 Customer Accounts</h3>
       <div style="display:flex; gap:8px;">
         <button onclick="custToggleForm()">+ New Delivery</button>
+        <button class="secondary" onclick="custTogglePast()">+ Add Past Record</button>
         <button class="secondary" onclick="loadCustomers()">Refresh</button>
       </div>
     </div>
@@ -57,6 +58,50 @@
       </div>
       <button onclick="custSaveDelivery()" style="width:100%; margin-top:6px;">Save Delivery</button>
       <p class="error-text" id="cust-error" style="display:none;"></p>
+    </div>
+
+
+    <div id="cust-past" style="display:none; border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
+      <h4 style="margin:0 0 8px;">Add Past Record <span style="font-weight:400; color:var(--muted); font-size:0.8rem;">(written to the account only — lorry stock and the Profit Report are not changed)</span></h4>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:160px;"><label>Customer name *</label>
+          <input type="text" id="past-name" list="cust-names" placeholder="e.g. Mary Wanjiru" autocomplete="off" onchange="custPastAutofill()"></div>
+        <div class="field" style="flex:1; min-width:130px;"><label>Phone</label><input type="tel" id="past-phone" placeholder="07xx xxx xxx"></div>
+        <div class="field" style="flex:1; min-width:150px;"><label>Location</label><input type="text" id="past-location" placeholder="e.g. Kasarani, Mwiki"></div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:150px;"><label>Date *</label><input type="date" id="past-date"></div>
+        <div class="field" style="flex:1; min-width:150px;"><label>What happened</label>
+          <select id="past-type" onchange="custPastType()">
+            <option value="delivery">Products delivered (credit / sale)</option>
+            <option value="payment">Payment received</option>
+          </select></div>
+      </div>
+      <datalist id="cust-products"></datalist>
+      <div id="past-del-box">
+        <div id="past-lines" oninput="custPastTotal()"></div>
+        <button class="secondary" onclick="custPastAddLine()">+ Add product line</button>
+        <p style="color:var(--muted); font-size:0.8rem; margin:6px 0;">Tip: for an old balance with no product details, add one line like "Previous balance", qty 1, price = the amount.</p>
+        <div style="display:flex; justify-content:space-between; margin:6px 0;">
+          <span style="color:var(--muted); font-size:0.85rem;">Total delivered</span><strong id="past-total">Ksh 0</strong>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div class="field" style="flex:1; min-width:150px;"><label>Paid on that day (Ksh, optional)</label>
+            <input type="number" id="past-del-paid" min="0" step="any" placeholder="0"></div>
+          <div class="field" style="flex:1; min-width:120px;"><label>Paid via</label>
+            <select id="past-del-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
+        </div>
+      </div>
+      <div id="past-pay-box" style="display:none;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div class="field" style="flex:1; min-width:150px;"><label>Amount paid (Ksh) *</label>
+            <input type="number" id="past-pay-amt" min="0" step="any" placeholder="0"></div>
+          <div class="field" style="flex:1; min-width:120px;"><label>Paid via</label>
+            <select id="past-pay-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
+        </div>
+      </div>
+      <button onclick="custSavePast()" style="width:100%; margin-top:6px;">Save Past Record</button>
+      <p class="error-text" id="past-err" style="display:none;"></p>
     </div>
 
     <div class="field"><input type="text" id="cust-search" placeholder="Search customers..." autocomplete="off"></div>
@@ -298,6 +343,110 @@
     const { error } = await supabaseClient.from('lorry_customer_ledger').delete().eq('id', id);
     if (error) { alert('Error: ' + error.message); return; }
     await loadCustomers();
+  };
+
+
+  // ─── ADD PAST RECORD (back-dated; account only — no stock or Profit Report change) ───
+  window.custTogglePast = function () {
+    const f = document.getElementById('cust-past');
+    const open = f.style.display === 'none';
+    f.style.display = open ? 'block' : 'none';
+    if (!open) return;
+    document.getElementById('cust-products').innerHTML =
+      storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
+    if (!document.getElementById('past-date').value) document.getElementById('past-date').value = todayDateInputValue();
+    if (!document.getElementById('past-lines').children.length) custPastAddLine();
+  };
+
+  window.custPastType = function () {
+    const isDel = document.getElementById('past-type').value === 'delivery';
+    document.getElementById('past-del-box').style.display = isDel ? 'block' : 'none';
+    document.getElementById('past-pay-box').style.display = isDel ? 'none' : 'block';
+  };
+
+  window.custPastAutofill = function () {
+    const a = accounts.find(x => x.key === keyOf(document.getElementById('past-name').value));
+    if (!a) return;
+    if (!document.getElementById('past-phone').value) document.getElementById('past-phone').value = a.phone || '';
+    if (!document.getElementById('past-location').value) document.getElementById('past-location').value = a.location || '';
+  };
+
+  window.custPastAddLine = function () {
+    const row = document.createElement('div');
+    row.className = 'past-line';
+    row.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;';
+    row.innerHTML = `
+      <input type="text" class="pl-name" list="cust-products" placeholder="Product" autocomplete="off" style="flex:2; min-width:160px;">
+      <input type="number" class="pl-qty" min="0" step="any" placeholder="Qty" style="width:70px;">
+      <input type="number" class="pl-price" min="0" step="any" placeholder="Price" style="width:100px;">
+      <button class="secondary" type="button" onclick="this.parentNode.remove(); custPastTotal();">✕</button>`;
+    document.getElementById('past-lines').appendChild(row);
+  };
+
+  function pastLines() {
+    return Array.from(document.querySelectorAll('#past-lines .past-line')).map(r => ({
+      name: r.querySelector('.pl-name').value.trim(),
+      qty: parseFloat(r.querySelector('.pl-qty').value),
+      price: parseFloat(r.querySelector('.pl-price').value)
+    })).filter(l => l.name || l.qty || l.price);
+  }
+
+  window.custPastTotal = function () {
+    const t = pastLines().reduce((s, l) => s + ((l.qty > 0 && l.price >= 0) ? l.qty * l.price : 0), 0);
+    document.getElementById('past-total').textContent = money(t);
+  };
+
+  window.custSavePast = async function () {
+    const errEl = document.getElementById('past-err');
+    errEl.style.display = 'none';
+    const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
+
+    const name = document.getElementById('past-name').value.trim();
+    const phone = document.getElementById('past-phone').value.trim();
+    const location = document.getElementById('past-location').value.trim();
+    const day = document.getElementById('past-date').value;
+    const type = document.getElementById('past-type').value;
+    if (!name) return showErr('Enter the customer name.');
+    if (!day) return showErr('Pick the date.');
+    if (!navigator.onLine) return showErr('Saving needs internet.');
+
+    // Keep the chosen day but use the current time of day so same-day entries stay in order
+    const [y, m, d] = day.split('-').map(Number);
+    const now = new Date();
+    const base = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+    const common = { customer_name: name, phone: phone || null, location: location || null, staff_id: currentStaff.id };
+    const rows = [];
+
+    if (type === 'payment') {
+      const amount = parseFloat(document.getElementById('past-pay-amt').value);
+      if (!amount || amount <= 0) return showErr('Enter the amount paid.');
+      rows.push({ ...common, entry_type: 'payment', amount, method: document.getElementById('past-pay-via').value, created_at: base.toISOString() });
+    } else {
+      const lines = pastLines();
+      if (!lines.length) return showErr('Add at least one product line.');
+      for (const l of lines) {
+        if (!l.name) return showErr('Every line needs a product name.');
+        if (!l.qty || l.qty <= 0) return showErr(`Enter a quantity for ${l.name}.`);
+        if (isNaN(l.price) || l.price <= 0) return showErr(`Enter a price for ${l.name}.`);
+      }
+      const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
+      const paid = parseFloat(document.getElementById('past-del-paid').value) || 0;
+      if (paid < 0 || paid > total) return showErr(`Paid on that day must be between 0 and ${money(total)}.`);
+      rows.push({ ...common, entry_type: 'delivery', items: lines.map(l => ({ name: l.name, qty: l.qty, price: l.price })), amount: total, created_at: base.toISOString() });
+      if (paid > 0) rows.push({ ...common, entry_type: 'payment', amount: paid, method: document.getElementById('past-del-via').value, created_at: new Date(base.getTime() + 1000).toISOString() });
+    }
+
+    const { error } = await supabaseClient.from('lorry_customer_ledger').insert(rows);
+    if (error) return showErr('Error: ' + error.message);
+
+    // Clear for the next one but keep the customer so several old entries are quick to add
+    document.getElementById('past-lines').innerHTML = '';
+    document.getElementById('past-del-paid').value = '';
+    document.getElementById('past-pay-amt').value = '';
+    document.getElementById('past-total').textContent = 'Ksh 0';
+    custPastAddLine();
+    await loadCustomers();
+    alert(`✅ Past record saved for ${name} (${formatLedgerDate(day)}). You can add another for the same customer.`);
   };
 
   // ─── WIRING ───
