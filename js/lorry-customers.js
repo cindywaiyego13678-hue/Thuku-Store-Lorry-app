@@ -325,7 +325,7 @@
       <td>${fmtDate(e.created_at)}</td><td>${e.method === 'mpesa' ? 'M-Pesa' : 'Cash'}</td>
       <td style="color:#1a7f37; font-weight:700;">−${money(e.amount)}</td><td>${money(before)}</td>
       <td style="font-weight:700;">${money(after)}</td>
-      ${canDelete ? `<td><button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td>` : ''}</tr>`).join('');
+      ${canDelete ? `<td style="white-space:nowrap;"><button class="secondary" onclick="custEditEntry('${e.id}')">✎</button> <button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td>` : ''}</tr>`).join('');
 
     const payForm = a.balance > 0 ? `
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
@@ -341,10 +341,10 @@
       <p class="error-text" id="cp-err" style="display:none;"></p>`
       : '<div style="color:#1a7f37; font-weight:700;">✅ No credit outstanding — this account is cleared.</div>';
 
-    const allEntries = canDelete ? `<details style="margin-top:10px;"><summary style="cursor:pointer; color:var(--muted); font-size:0.85rem;">All entries (admin — delete a wrong entry)</summary>
+    const allEntries = canDelete ? `<details style="margin-top:10px;"><summary style="cursor:pointer; color:var(--muted); font-size:0.85rem;">All entries (admin — edit or delete a wrong entry)</summary>
       <table style="margin-top:6px;"><tbody>${tl.map(({ e }) => `<tr>
-        <td>${fmtDate(e.created_at)}</td><td>${e.entry_type === 'delivery' ? 'Delivery' : 'Payment'}</td><td>${money(e.amount)}</td>
-        <td><button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td></tr>`).join('')}</tbody></table></details>` : '';
+        <td>${fmtDate(e.created_at)}</td><td>${e.entry_type === 'delivery' ? 'Order' : 'Paid ' + (e.method === 'mpesa' ? 'M-Pesa' : 'Cash')}</td><td>${money(e.amount)}</td>
+        <td style="white-space:nowrap;"><button class="secondary" onclick="custEditEntry('${e.id}')">✎</button> <button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td></tr>`).join('')}</tbody></table></details>` : '';
 
     return `<div style="border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
       <div style="font-weight:800; font-size:1.05rem;">${escapeHtml(a.name)}</div>
@@ -434,6 +434,45 @@
 
     await loadCustomers();
     alert(`✅ ${money(amount)} received from ${a.name}. Credit remaining: ${money(a.balance - amount)}.`);
+  };
+
+  // Fix a typo: change the amount, method or date of an entry (admin)
+  window.custEditEntry = async function (id) {
+    let entry = null, acct = null;
+    accounts.forEach(a => a.entries.forEach(e => { if (e.id === id) { entry = e; acct = a; } }));
+    if (!entry) return;
+    const isDel = entry.entry_type === 'delivery';
+
+    const amtAns = prompt(`${acct.name}\n${isDel ? 'Order total' : 'Payment amount'} (Ksh):`, entry.amount);
+    if (amtAns === null) return;
+    const amount = parseFloat(amtAns);
+    if (!amount || amount <= 0) { alert('Enter a valid amount.'); return; }
+
+    let method = entry.method;
+    if (!isDel) {
+      const mAns = prompt('Paid by? Type: cash or mpesa', entry.method || 'cash');
+      if (mAns === null) return;
+      method = mAns.trim().toLowerCase();
+      if (!['cash', 'mpesa'].includes(method)) { alert('Please type cash or mpesa.'); return; }
+    }
+
+    const dayAns = prompt('Date (YYYY-MM-DD):', localISO(new Date(entry.created_at)));
+    if (dayAns === null) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayAns.trim())) { alert('Use the format YYYY-MM-DD, e.g. 2026-11-18.'); return; }
+
+    const delivered = acct.delivered + (isDel ? amount - Number(entry.amount) : 0);
+    const paid = acct.paid + (isDel ? 0 : amount - Number(entry.amount));
+    if (paid > delivered) { alert('Payments cannot be more than the total ordered. Check the amount.'); return; }
+    if (isDel && entry.items && entry.items.length && !confirm('This order has a product list. Only the total will change — the product list stays as it is. Continue?')) return;
+    if (!navigator.onLine) { alert('Editing needs internet.'); return; }
+
+    const orig = new Date(entry.created_at);
+    const [y, m, d] = dayAns.trim().split('-').map(Number);
+    const patch = { amount, created_at: new Date(y, m - 1, d, orig.getHours(), orig.getMinutes(), orig.getSeconds()).toISOString() };
+    if (!isDel) patch.method = method;
+    const { error } = await supabaseClient.from('lorry_customer_ledger').update(patch).eq('id', id);
+    if (error) { alert('Error: ' + error.message); return; }
+    await loadCustomers();
   };
 
   window.custDeleteEntry = async function (id) {
