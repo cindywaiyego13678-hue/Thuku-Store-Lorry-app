@@ -1,0 +1,75 @@
+/* ------------------------------------------------------------------
+   lorry-responsive.css — readable on phone, tablet and desktop
+   Load AFTER css/style.css and css/responsive-fix.css:
+     <link rel="stylesheet" href="css/lorry-responsive.css">
+   Works together with js/lorry-responsive.js (turns wide tables into cards on phones).
+------------------------------------------------------------------- */
+
+/* ── Layout: two balanced columns on desktop, one on phone/tablet ── */
+.container { max-width: 1400px; margin-left: auto; margin-right: auto; }
+.lorry-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.lorry-layout > div { min-width: 0; }               /* stops wide content stretching a column */
+.card { max-width: 100%; box-sizing: border-box; }
+input, select, textarea, button { max-width: 100%; box-sizing: border-box; }
+.card table { width: 100%; }
+.card td, .card th { overflow-wrap: anywhere; }
+
+/* Long lists scroll inside their own box instead of stretching the page */
+#issue-list, #past-list, #cust-items { -webkit-overflow-scrolling: touch; }
+
+/* ── Tablet and below: single column ── */
+@media (max-width: 960px) {
+  .lorry-layout { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* ── Phone ── */
+@media (max-width: 700px) {
+  body { font-size: 16px; }
+  .container { padding-left: 10px !important; padding-right: 10px !important; }
+  .card { padding: 14px !important; }
+  .card h3 { font-size: 1.05rem; }
+
+  /* top bar + tabs */
+  .topbar { flex-wrap: wrap; gap: 8px; padding-left: 12px !important; padding-right: 12px !important; }
+  .topbar > div { flex-wrap: wrap; gap: 8px !important; }
+  .nav-tabs { overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+
+  /* bigger tap targets; 16px stops iPhones zooming in on inputs */
+  input, select, textarea { font-size: 16px !important; min-height: 44px; }
+  input[type="checkbox"] { min-height: 0; width: 20px; height: 20px; }
+  button { min-height: 44px; }
+  input[type="date"] { width: 100%; }
+
+  /* fields and toolbars stack full width */
+  .field { min-width: 0 !important; max-width: none !important; }
+  .report-toolbar { align-items: stretch; }
+  .report-toolbar .field { flex: 1 1 100%; max-width: none !important; }
+  .report-toolbar button { width: 100%; }
+  #customers-card > div:first-child { flex-direction: column; align-items: stretch !important; }
+  #customers-card > div:first-child > div { display: flex; flex-wrap: wrap; gap: 8px; }
+  #customers-card > div:first-child > div button { flex: 1 1 auto; }
+  .past-line .pl-name { flex: 1 1 100% !important; }
+  .past-line .pl-qty, .past-line .pl-price { flex: 1 1 40% !important; width: auto !important; }
+
+  /* ledger-style summary: stack instead of 3 wide columns */
+  .ledger-summary { font-size: 0.95rem; padding: 12px; }
+  .ledger-line, .ledger-totals, .ledger-profit-row { grid-template-columns: 1fr; gap: 2px; white-space: normal; }
+  .ledger-line { border-bottom: 1px dashed var(--border, #33455c); padding: 4px 0; }
+
+  /* compact tables (few columns): smaller text, scroll sideways only if they must */
+  .card table:not(.rl-cards) { display: block; overflow-x: auto; font-size: 0.85rem; -webkit-overflow-scrolling: touch; }
+  .card table:not(.rl-cards) td, .card table:not(.rl-cards) th { padding: 6px 6px; }
+
+  /* wide tables (5+ columns) become one card per row, label beside each value */
+  table.rl-cards, table.rl-cards tbody, table.rl-cards tr, table.rl-cards td { display: block; width: 100%; }
+  table.rl-cards thead { display: none; }
+  table.rl-cards tr { border: 1px solid var(--border, #33455c); border-radius: 8px; margin-bottom: 10px; padding: 6px 10px; }
+  table.rl-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 5px 0 !important; border: 0 !important; text-align: right; }
+  table.rl-cards td::before { content: attr(data-label); flex: 0 0 38%; font-weight: 600; color: var(--muted, #8ea0b6); text-align: left; }
+  table.rl-cards td[data-label=""]::before { display: none; }
+}
