@@ -73,3 +73,12 @@ input, select, textarea, button { max-width: 100%; box-sizing: border-box; }
   table.rl-cards td::before { content: attr(data-label); flex: 0 0 38%; font-weight: 600; color: var(--muted, #8ea0b6); text-align: left; }
   table.rl-cards td[data-label=""]::before { display: none; }
 }
+
+/* ── Fix: page zooming in/out while scrolling on phones ──
+   Anything wider than the screen lets the browser pan/zoom sideways.
+   Lock the page to vertical scrolling; wide tables still scroll sideways inside their own box. */
+html, body { max-width: 100%; overflow-x: hidden; touch-action: pan-y; }
+.container, .card, .lorry-layout > div { max-width: 100%; }
+img, svg, canvas, video { max-width: 100%; height: auto; }
+.card table:not(.rl-cards), #issue-list, #past-list, #cust-items, .ledger-summary,
+#cust-detail div[style*="overflow-x"], #cust-list div[style*="overflow-x"] { touch-action: pan-x pan-y; }
