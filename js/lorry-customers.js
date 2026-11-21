@@ -44,7 +44,6 @@
         <div class="field" style="flex:1; min-width:160px;"><label>Customer name *</label>
           <input type="text" id="cust-name" list="cust-names" placeholder="e.g. Mary Wanjiru" autocomplete="off" onchange="custAutofill()">
           <datalist id="cust-names"></datalist></div>
-        <div class="field" style="flex:1; min-width:130px;"><label>Phone</label><input type="tel" id="cust-phone" placeholder="07xx xxx xxx"></div>
         <div class="field" style="flex:1; min-width:150px;"><label>Location</label><input type="text" id="cust-location" placeholder="e.g. Kasarani, Mwiki"></div>
       </div>
       <div id="cust-items" style="max-height:280px; overflow-y:auto; border:1px solid var(--border, #e2e6ea); border-radius:8px;"></div>
@@ -65,45 +64,43 @@
 
 
     <div id="cust-past" style="display:none; border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
-      <h4 style="margin:0 0 8px;">Add Past Record <span style="font-weight:400; color:var(--muted); font-size:0.8rem;">(written to the account only — lorry stock and the Profit Report are not changed)</span></h4>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <div class="field" style="flex:1; min-width:160px;"><label>Customer name *</label>
-          <input type="text" id="past-name" list="cust-names" placeholder="e.g. Mary Wanjiru" autocomplete="off" onchange="custPastAutofill()"></div>
-        <div class="field" style="flex:1; min-width:130px;"><label>Phone</label><input type="tel" id="past-phone" placeholder="07xx xxx xxx"></div>
-        <div class="field" style="flex:1; min-width:150px;"><label>Location</label><input type="text" id="past-location" placeholder="e.g. Kasarani, Mwiki"></div>
-      </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <div class="field" style="flex:1; min-width:150px;"><label>Date *</label><input type="date" id="past-date"></div>
-        <div class="field" style="flex:1; min-width:150px;"><label>What happened</label>
-          <select id="past-type" onchange="custPastType()">
-            <option value="delivery">Products delivered (credit / sale)</option>
-            <option value="payment">Payment received</option>
-          </select></div>
-      </div>
+      <h4 style="margin:0 0 4px;">Add Past Customer Record</h4>
+      <p style="color:var(--muted); font-size:0.8rem; margin:0 0 10px;">Written to the customer's account only — lorry stock and the Profit Report are not changed.</p>
+      <div class="field"><label>Customer name *</label>
+        <input type="text" id="past-name" list="cust-names" placeholder="e.g. Mary Wanjiru" autocomplete="off"></div>
       <datalist id="cust-products"></datalist>
-      <div id="past-del-box">
-        <div id="past-lines" oninput="custPastTotal()"></div>
-        <button class="secondary" onclick="custPastAddLine()">+ Add product line</button>
-        <p style="color:var(--muted); font-size:0.8rem; margin:6px 0;">Tip: for an old balance with no product details, add one line like "Previous balance", qty 1, price = the amount.</p>
-        <div style="display:flex; justify-content:space-between; margin:6px 0;">
-          <span style="color:var(--muted); font-size:0.85rem;">Total delivered</span><strong id="past-total">Ksh 0</strong>
-        </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div class="field" style="flex:1; min-width:150px;"><label>Paid on that day (Ksh, optional)</label>
-            <input type="number" id="past-del-paid" min="0" step="any" placeholder="0"></div>
-          <div class="field" style="flex:1; min-width:120px;"><label>Paid via</label>
-            <select id="past-del-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
-        </div>
+
+      <h5 style="margin:8px 0 6px;">1. The order</h5>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:140px;"><label>Order date *</label><input type="date" id="past-date"></div>
+        <div class="field" style="flex:1; min-width:140px;"><label>Order total (Ksh) *</label>
+          <input type="number" id="past-total-input" min="0" step="any" placeholder="0" oninput="custPastRecalc()"></div>
       </div>
-      <div id="past-pay-box" style="display:none;">
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <div class="field" style="flex:1; min-width:150px;"><label>Amount paid (Ksh) *</label>
-            <input type="number" id="past-pay-amt" min="0" step="any" placeholder="0"></div>
-          <div class="field" style="flex:1; min-width:120px;"><label>Paid via</label>
-            <select id="past-pay-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
-        </div>
+      <details style="margin-bottom:8px;">
+        <summary style="cursor:pointer; color:var(--muted); font-size:0.85rem;">Add product details (optional — fills the total for you)</summary>
+        <div id="past-lines" oninput="custPastTotal()" style="margin-top:8px;"></div>
+        <button class="secondary" type="button" onclick="custPastAddLine()">+ Add product line</button>
+      </details>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:140px;"><label>Paid on the order day (Ksh)</label>
+          <input type="number" id="past-del-paid" min="0" step="any" placeholder="0" oninput="custPastRecalc()"></div>
+        <div class="field" style="flex:1; min-width:110px;"><label>Paid via</label>
+          <select id="past-del-via"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select></div>
       </div>
-      <button onclick="custSavePast()" style="width:100%; margin-top:6px;">Save Past Record</button>
+      <div style="display:flex; justify-content:space-between; margin:2px 0 10px;">
+        <span style="color:var(--muted); font-size:0.85rem;">Credit after the order day</span>
+        <strong id="past-credit" style="color:#c0392b;">Ksh 0</strong>
+      </div>
+
+      <h5 style="margin:8px 0 6px;">2. Later payments of the credit <span style="font-weight:400; color:var(--muted); font-size:0.8rem;">(one row per payment, each with its date)</span></h5>
+      <div id="past-credit-pays" oninput="custPastRecalc()"></div>
+      <button class="secondary" type="button" onclick="custPastAddPay()">+ Add a credit payment</button>
+      <div style="display:flex; justify-content:space-between; margin:10px 0;">
+        <span style="font-weight:700;">Credit still remaining</span>
+        <strong id="past-remaining" style="color:#c0392b;">Ksh 0</strong>
+      </div>
+
+      <button onclick="custSavePast()" style="width:100%;">Save Past Record</button>
       <p class="error-text" id="past-err" style="display:none;"></p>
     </div>
 
@@ -168,7 +165,6 @@
   window.custAutofill = function () {
     const a = accounts.find(x => x.key === keyOf(document.getElementById('cust-name').value));
     if (!a) return;
-    if (!document.getElementById('cust-phone').value) document.getElementById('cust-phone').value = a.phone || '';
     if (!document.getElementById('cust-location').value) document.getElementById('cust-location').value = a.location || '';
   };
 
@@ -179,7 +175,6 @@
     const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
 
     const name = document.getElementById('cust-name').value.trim();
-    const phone = document.getElementById('cust-phone').value.trim();
     const location = document.getElementById('cust-location').value.trim();
     const via = document.getElementById('cust-via').value;
     const paidNow = parseFloat(document.getElementById('cust-paid').value) || 0;
@@ -198,7 +193,6 @@
     if (!lines.length) return showErr('Enter a quantity for at least one item delivered.');
     const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
     if (paidNow < 0 || paidNow > total) return showErr(`Paid now must be between 0 and ${money(total)}.`);
-    if (paidNow < total && !phone) return showErr('Enter the customer phone — part of this delivery is on credit.');
     if (!navigator.onLine) return showErr('Saving a delivery needs internet.');
 
     const saleMethod = paidNow >= total ? via : (paidNow > 0 ? 'mixed' : 'credit');
@@ -208,7 +202,7 @@
     for (const l of lines) {
       const { error } = await supabaseClient.rpc('record_lorry_sale', {
         p_store_product_id: l.row.store_product_id, p_quantity: l.qty, p_unit_price: l.price,
-        p_customer_name: name, p_customer_phone: phone || null, p_payment_method: saleMethod,
+        p_customer_name: name, p_customer_phone: null, p_payment_method: saleMethod,
         p_staff_id: currentStaff.id, p_synced: true
       });
       if (error) { failed.push(`${l.label}: ${error.message}`); continue; }
@@ -220,12 +214,12 @@
     const paid = Math.min(paidNow, okTotal);
     const now = new Date();
     const rows = [{
-      customer_name: name, phone: phone || null, location: location || null, entry_type: 'delivery',
+      customer_name: name, location: location || null, entry_type: 'delivery',
       items: okLines.map(l => ({ name: l.label, qty: l.qty, price: l.price })),
       amount: okTotal, staff_id: currentStaff.id, created_at: now.toISOString()
     }];
     if (paid > 0) rows.push({
-      customer_name: name, phone: phone || null, location: location || null, entry_type: 'payment',
+      customer_name: name, location: location || null, entry_type: 'payment',
       amount: paid, method: via, paid_at_order: true, staff_id: currentStaff.id, created_at: new Date(now.getTime() + 1000).toISOString()
     });
     const { error: ledErr } = await supabaseClient.from('lorry_customer_ledger').insert(rows);
@@ -239,7 +233,7 @@
     if (ledErr) return showErr(`Stock was taken off the lorry but the account entry FAILED: ${ledErr.message}. Add it manually: ${name}, ${money(okTotal)}, paid ${money(paid)}.`);
     if (failed.length) return showErr(`Saved ${okLines.length} item(s). Not saved: ${failed.join('; ')}.`);
 
-    ['cust-name', 'cust-phone', 'cust-location', 'cust-paid'].forEach(id => document.getElementById(id).value = '');
+    ['cust-name', 'cust-location', 'cust-paid'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('cust-form').style.display = 'none';
     renderItems();
     alert(`✅ Delivery saved for ${name} — ${money(paid)} paid, ${money(okTotal - paid)} on credit.`);
@@ -316,7 +310,7 @@
 
     const dayRows = days.map(d => {
       const change = d.ordered - d.cash - d.mpesa;
-      const prods = d.items.map(i => `${i.qty} × ${escapeHtml(i.name)} @ ${Math.round(i.price).toLocaleString()}`).join('<br>') || '—';
+      const prods = d.items.map(i => `${i.qty} × ${escapeHtml(i.name)} @ ${Math.round(i.price).toLocaleString()}`).join('<br>') || (d.ordered ? 'Order — no product details' : '—');
       const chg = change > 0 ? `<span style="color:#c0392b;">+${money(change)}<br><small>credit added</small></span>`
         : change < 0 ? `<span style="color:#1a7f37;">−${money(-change)}<br><small>credit reduced</small></span>` : '—';
       return `<tr>
@@ -354,7 +348,7 @@
 
     return `<div style="border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
       <div style="font-weight:800; font-size:1.05rem;">${escapeHtml(a.name)}</div>
-      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">${a.phone ? '📞 ' + escapeHtml(a.phone) : ''}${a.location ? ' · 📍 ' + escapeHtml(a.location) : ''}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">${a.location ? '📍 ' + escapeHtml(a.location) : ''}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
         ${tile('Total ordered', money(a.delivered))}
         ${tile('Paid — Cash', money(cash))}
@@ -433,7 +427,7 @@
     const now = new Date();
     const createdAt = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
     const { error } = await supabaseClient.from('lorry_customer_ledger').insert([{
-      customer_name: a.name, phone: a.phone || null, location: a.location || null,
+      customer_name: a.name, location: a.location || null,
       entry_type: 'payment', amount, method, paid_at_order: false, staff_id: currentStaff.id, created_at: createdAt
     }]);
     if (error) return showErr('Error: ' + error.message);
@@ -458,22 +452,10 @@
     document.getElementById('cust-products').innerHTML =
       storeProducts.map(p => `<option value="${escapeAttr(displayName(p))}">`).join('');
     if (!document.getElementById('past-date').value) document.getElementById('past-date').value = todayDateInputValue();
-    if (!document.getElementById('past-lines').children.length) custPastAddLine();
+    custPastRecalc();
   };
 
-  window.custPastType = function () {
-    const isDel = document.getElementById('past-type').value === 'delivery';
-    document.getElementById('past-del-box').style.display = isDel ? 'block' : 'none';
-    document.getElementById('past-pay-box').style.display = isDel ? 'none' : 'block';
-  };
-
-  window.custPastAutofill = function () {
-    const a = accounts.find(x => x.key === keyOf(document.getElementById('past-name').value));
-    if (!a) return;
-    if (!document.getElementById('past-phone').value) document.getElementById('past-phone').value = a.phone || '';
-    if (!document.getElementById('past-location').value) document.getElementById('past-location').value = a.location || '';
-  };
-
+  // optional product lines
   window.custPastAddLine = function () {
     const row = document.createElement('div');
     row.className = 'past-line';
@@ -494,9 +476,43 @@
     })).filter(l => l.name || l.qty || l.price);
   }
 
+  // product lines fill the order total (you can still edit it)
   window.custPastTotal = function () {
     const t = pastLines().reduce((s, l) => s + ((l.qty > 0 && l.price >= 0) ? l.qty * l.price : 0), 0);
-    document.getElementById('past-total').textContent = money(t);
+    if (t > 0) document.getElementById('past-total-input').value = t;
+    custPastRecalc();
+  };
+
+  // successive credit payments
+  window.custPastAddPay = function () {
+    const row = document.createElement('div');
+    row.className = 'past-pay';
+    row.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;';
+    row.innerHTML = `
+      <input type="date" class="pp-date" style="flex:1; min-width:140px;">
+      <input type="number" class="pp-amt" min="0" step="any" placeholder="Amount" style="flex:1; min-width:100px;">
+      <select class="pp-via" style="flex:1; min-width:90px;"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option></select>
+      <button class="secondary" type="button" onclick="this.parentNode.remove(); custPastRecalc();">✕</button>`;
+    document.getElementById('past-credit-pays').appendChild(row);
+  };
+
+  function pastPays() {
+    return Array.from(document.querySelectorAll('#past-credit-pays .past-pay')).map(r => ({
+      day: r.querySelector('.pp-date').value,
+      amount: parseFloat(r.querySelector('.pp-amt').value),
+      method: r.querySelector('.pp-via').value
+    })).filter(p => p.day || p.amount);
+  }
+
+  window.custPastRecalc = function () {
+    const total = parseFloat(document.getElementById('past-total-input').value) || 0;
+    const paidDay = parseFloat(document.getElementById('past-del-paid').value) || 0;
+    const later = pastPays().reduce((s, p) => s + (p.amount > 0 ? p.amount : 0), 0);
+    const afterDay = total - paidDay, remaining = afterDay - later;
+    document.getElementById('past-credit').textContent = money(afterDay);
+    const rem = document.getElementById('past-remaining');
+    rem.textContent = money(remaining);
+    rem.style.color = remaining < 0 ? '#c0392b' : (remaining === 0 ? '#1a7f37' : '#c0392b');
   };
 
   window.custSavePast = async function () {
@@ -505,52 +521,56 @@
     const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
 
     const name = document.getElementById('past-name').value.trim();
-    const phone = document.getElementById('past-phone').value.trim();
-    const location = document.getElementById('past-location').value.trim();
     const day = document.getElementById('past-date').value;
-    const type = document.getElementById('past-type').value;
+    const total = parseFloat(document.getElementById('past-total-input').value);
+    const paidDay = parseFloat(document.getElementById('past-del-paid').value) || 0;
+    const via = document.getElementById('past-del-via').value;
     if (!name) return showErr('Enter the customer name.');
-    if (!day) return showErr('Pick the date.');
+    if (!day) return showErr('Pick the order date.');
+    if (!total || total <= 0) return showErr('Enter the order total.');
+    if (paidDay < 0 || paidDay > total) return showErr(`Paid on the order day must be between 0 and ${money(total)}.`);
+
+    const lines = pastLines();
+    for (const l of lines) {
+      if (!l.name || !l.qty || l.qty <= 0 || isNaN(l.price) || l.price < 0) return showErr('Finish or remove the incomplete product line.');
+    }
+    const pays = pastPays();
+    for (const p of pays) {
+      if (!p.day) return showErr('Every credit payment needs a date.');
+      if (!p.amount || p.amount <= 0) return showErr('Every credit payment needs an amount.');
+      if (p.day < day) return showErr(`A credit payment is dated before the order date (${formatLedgerDate(day)}).`);
+    }
+    const laterTotal = pays.reduce((s, p) => s + p.amount, 0);
+    if (laterTotal > total - paidDay) return showErr(`Credit payments (${money(laterTotal)}) are more than the credit (${money(total - paidDay)}).`);
     if (!navigator.onLine) return showErr('Saving needs internet.');
 
-    // Keep the chosen day but use the current time of day so same-day entries stay in order
-    const [y, m, d] = day.split('-').map(Number);
+    // each entry keeps its chosen day; the current time of day keeps same-day entries in order
     const now = new Date();
-    const base = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
-    const common = { customer_name: name, phone: phone || null, location: location || null, staff_id: currentStaff.id };
-    const rows = [];
-
-    if (type === 'payment') {
-      const amount = parseFloat(document.getElementById('past-pay-amt').value);
-      if (!amount || amount <= 0) return showErr('Enter the amount paid.');
-      rows.push({ ...common, entry_type: 'payment', amount, method: document.getElementById('past-pay-via').value, created_at: base.toISOString() });
-    } else {
-      const lines = pastLines();
-      if (!lines.length) return showErr('Add at least one product line.');
-      for (const l of lines) {
-        if (!l.name) return showErr('Every line needs a product name.');
-        if (!l.qty || l.qty <= 0) return showErr(`Enter a quantity for ${l.name}.`);
-        if (isNaN(l.price) || l.price <= 0) return showErr(`Enter a price for ${l.name}.`);
-      }
-      const total = lines.reduce((s, l) => s + l.qty * l.price, 0);
-      const paid = parseFloat(document.getElementById('past-del-paid').value) || 0;
-      if (paid < 0 || paid > total) return showErr(`Paid on that day must be between 0 and ${money(total)}.`);
-      rows.push({ ...common, entry_type: 'delivery', items: lines.map(l => ({ name: l.name, qty: l.qty, price: l.price })), amount: total, created_at: base.toISOString() });
-      if (paid > 0) rows.push({ ...common, entry_type: 'payment', amount: paid, method: document.getElementById('past-del-via').value, paid_at_order: true, created_at: new Date(base.getTime() + 1000).toISOString() });
-    }
+    const at = (iso, plusSec) => {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds() + plusSec).toISOString();
+    };
+    const common = { customer_name: name, staff_id: currentStaff.id };
+    const rows = [{
+      ...common, entry_type: 'delivery', amount: total, created_at: at(day, 0),
+      items: lines.length ? lines.map(l => ({ name: l.name, qty: l.qty, price: l.price })) : null
+    }];
+    if (paidDay > 0) rows.push({ ...common, entry_type: 'payment', amount: paidDay, method: via, paid_at_order: true, created_at: at(day, 1) });
+    pays.slice().sort((x, y) => x.day.localeCompare(y.day)).forEach((p, i) => {
+      rows.push({ ...common, entry_type: 'payment', amount: p.amount, method: p.method, paid_at_order: false, created_at: at(p.day, 2 + i) });
+    });
 
     const { error } = await supabaseClient.from('lorry_customer_ledger').insert(rows);
     if (error) return showErr('Error: ' + error.message);
     selectedKey = keyOf(name);
 
-    // Clear for the next one but keep the customer so several old entries are quick to add
+    // clear for the next record (the customer name stays so you can add their next order)
     document.getElementById('past-lines').innerHTML = '';
-    document.getElementById('past-del-paid').value = '';
-    document.getElementById('past-pay-amt').value = '';
-    document.getElementById('past-total').textContent = 'Ksh 0';
-    custPastAddLine();
+    document.getElementById('past-credit-pays').innerHTML = '';
+    ['past-total-input', 'past-del-paid'].forEach(id => document.getElementById(id).value = '');
+    custPastRecalc();
     await loadCustomers();
-    alert(`✅ Past record saved for ${name} (${formatLedgerDate(day)}). You can add another for the same customer.`);
+    alert(`✅ Past record saved for ${name} — credit remaining ${money(total - paidDay - laterTotal)}. You can add another order for the same customer.`);
   };
 
   // ─── WIRING ───
