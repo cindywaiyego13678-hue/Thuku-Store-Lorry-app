@@ -214,7 +214,7 @@
     const paid = Math.min(paidNow, okTotal);
     const now = new Date();
     const rows = [{
-      customer_name: name, location: location || null, entry_type: 'delivery',
+      customer_name: name, location: location || null, entry_type: 'delivery', paid_at_order: false,
       items: okLines.map(l => ({ name: l.label, qty: l.qty, price: l.price })),
       amount: okTotal, staff_id: currentStaff.id, created_at: now.toISOString()
     }];
@@ -552,7 +552,7 @@
     };
     const common = { customer_name: name, staff_id: currentStaff.id };
     const rows = [{
-      ...common, entry_type: 'delivery', amount: total, created_at: at(day, 0),
+      ...common, entry_type: 'delivery', paid_at_order: false, amount: total, created_at: at(day, 0),
       items: lines.length ? lines.map(l => ({ name: l.name, qty: l.qty, price: l.price })) : null
     }];
     if (paidDay > 0) rows.push({ ...common, entry_type: 'payment', amount: paidDay, method: via, paid_at_order: true, created_at: at(day, 1) });
