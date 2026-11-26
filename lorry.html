@@ -80,25 +80,8 @@
 
     <div class="grid lorry-layout">
 
-      <!-- LEFT: Lorry stock + close route -->
+      <!-- LEFT: customers + summaries -->
       <div>
-        <div class="card" style="margin-bottom:18px;">
-          <h3 style="margin-top:0;">Current Lorry Stock</h3>
-          <p style="color:var(--muted); font-size:0.8rem; margin-top:-8px;">Adjust the price for any item if it differs from the standard price — leftover stock is sold at the price shown here when you close the route.</p>
-          <div id="lorry-stock-table"><div class="empty-state">Loading...</div></div>
-          <button id="clear-lorry-btn" class="secondary" onclick="clearAllLorryStock()" style="width:100%; margin-top:12px; color:#c0392b; border-color:#c0392b; display:none;">🗑 Delete ALL Lorry Stock</button>
-        </div>
-
-        <div class="card">
-          <h3 style="margin-top:0;">🔚 Close Route / End of Day</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Everything still on the lorry (after returns are recorded) gets marked SOLD at the prices shown above. Only record returns for stock that actually came back.</p>
-          <div class="field">
-            <label>Payment method for these sales</label>
-            <select id="close-route-payment"><option value="cash">Cash</option><option value="mpesa">M-Pesa</option><option value="card">Card</option><option value="mixed">Mixed / Various</option></select>
-          </div>
-          <button onclick="closeRoute()" style="width:100%; background:#1a7f37;">✅ Close Route — Mark Remaining Stock as Sold</button>
-          <p class="error-text" id="close-route-error" style="display:none;"></p>
-        </div>
 
         <div class="card" style="margin-top:18px;">
           <h3 style="margin-top:0;">🗂 Download Summaries — one document per day</h3>
@@ -223,7 +206,6 @@
     let currentStaff = null;
     let lorryStock = [];
     let storeProducts = [];
-    let closeRoutePrices = {}; // { store_product_id: price } — user overrides for close-route selling price
     let currentReport = null;  // data behind the report currently on screen (used by Download / Print)
 
     (async () => {
@@ -297,110 +279,8 @@
       renderLorryStock();
     }
 
-    function renderLorryStock() {
-      const el = document.getElementById('lorry-stock-table');
-      document.getElementById('clear-lorry-btn').style.display = (canRemoveStock() && lorryStock.length) ? 'block' : 'none';
-      if (!lorryStock.length) { el.innerHTML = '<div class="empty-state">No stock loaded on the lorry yet.</div>'; return; }
-      el.innerHTML = `
-        <table>
-          <thead><tr><th>Product</th><th>Qty on Lorry</th><th>Price (Ksh)</th>${canRemoveStock() ? '<th></th>' : ''}</tr></thead>
-          <tbody>
-            ${lorryStock.map(r => {
-              const sp = r.store_products || {};
-              const defaultPrice = closeRoutePrices[r.store_product_id] ?? (sp.price ?? '');
-              return `
-              <tr>
-                <td>${escapeHtml(displayName(sp))}</td>
-                <td><span class="badge in_stock">${r.quantity}</span></td>
-                <td>
-                  <input type="number" min="0" step="any" style="width:100px;"
-                    value="${defaultPrice}"
-                    onchange="updateClosePrice('${r.store_product_id}', this.value)">
-                </td>
-                ${canRemoveStock() ? `<td><button class="secondary" onclick="removeLorryStock('${r.store_product_id}')">Delete</button></td>` : ''}
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>`;
-    }
-
-
-    // ─── DELETE LORRY STOCK (admin only) — removes the lorry_stock row only; store stock is NOT changed ──
-    function canRemoveStock() { return currentStaff && currentStaff.role === 'admin'; }
-
-    async function removeLorryStock(productId) {
-      const row = lorryStock.find(r => r.store_product_id === productId);
-      const name = row ? displayName(row.store_products || {}) : 'this item';
-      if (!confirm(`Delete ${name} (${row?.quantity ?? ''}) from the lorry?\n\nThis does NOT add it back to store stock. Use "Record a Return" for that.`)) return;
-      if (!navigator.onLine) { alert('Deleting lorry stock needs internet.'); return; }
-      const { error } = await supabaseClient.from('lorry_stock').delete().eq('store_product_id', productId);
-      if (error) { alert('Error deleting: ' + error.message); return; }
-      delete closeRoutePrices[productId];
-      await loadLorryStock();
-    }
-
-    async function clearAllLorryStock() {
-      if (!lorryStock.length) return;
-      if (!confirm(`Delete ALL ${lorryStock.length} product(s) from the lorry?\n\nThis does NOT add anything back to store stock and cannot be undone.`)) return;
-      if (!confirm('Are you sure? Everything on the lorry will be wiped.')) return;
-      if (!navigator.onLine) { alert('Deleting lorry stock needs internet.'); return; }
-      const ids = lorryStock.map(r => r.store_product_id);
-      const { error } = await supabaseClient.from('lorry_stock').delete().in('store_product_id', ids);
-      if (error) { alert('Error deleting: ' + error.message); return; }
-      closeRoutePrices = {};
-      await loadLorryStock();
-    }
-
-    function updateClosePrice(productId, value) {
-      closeRoutePrices[productId] = parseFloat(value);
-    }
-
-    // ─── CLOSE ROUTE: mark everything still on the lorry as SOLD ──
-    async function closeRoute() {
-      const errorEl = document.getElementById('close-route-error');
-      errorEl.style.display = 'none';
-      const paymentMethod = document.getElementById('close-route-payment').value;
-      const rowsToSell = lorryStock.filter(r => r.quantity > 0);
-
-      if (!rowsToSell.length) { alert('No stock left on the lorry to close out.'); return; }
-      if (!navigator.onLine) { errorEl.textContent = 'Closing the route needs internet (it records sales against live stock).'; errorEl.style.display = 'block'; return; }
-
-      const confirmed = confirm(`This will mark ${rowsToSell.length} product(s) still on the lorry as SOLD at the prices shown. This can't be undone automatically — continue?`);
-      if (!confirmed) return;
-
-      let successCount = 0;
-      const failed = [];
-
-      for (const row of rowsToSell) {
-        const sp = row.store_products || {};
-        const price = parseFloat(closeRoutePrices[row.store_product_id] ?? sp.price ?? 0);
-        if (!price || price <= 0) { failed.push(`${displayName(sp)} (no valid price set)`); continue; }
-
-        const { error } = await supabaseClient.rpc('record_lorry_sale', {
-          p_store_product_id: row.store_product_id,
-          p_quantity: row.quantity,
-          p_unit_price: price,
-          p_customer_name: null,
-          p_customer_phone: null,
-          p_payment_method: paymentMethod,
-          p_staff_id: currentStaff.id,
-          p_synced: true
-        });
-
-        if (error) { failed.push(`${displayName(sp)}: ${error.message}`); continue; }
-        successCount++;
-      }
-
-      await loadLorryStock();
-      await loadProfitReport();
-
-      if (failed.length) {
-        errorEl.textContent = `Closed ${successCount} product(s). Could not close: ${failed.join('; ')}`;
-        errorEl.style.display = 'block';
-      } else {
-        alert(`✅ Route closed — ${successCount} product(s) marked as sold.`);
-      }
-    }
+    // The Current Lorry Stock card was removed; kept as an empty hook because loadLorryStock() and lorry-customers.js call it
+    function renderLorryStock() {}
 
     // ─── RECORD RETURN (general end-of-route return — needs live connection) ──
     async function recordReturn() {
