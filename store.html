@@ -64,7 +64,7 @@
         </div>
       </div>
 
-      <!-- RIGHT: Restock + Transfer to shop + history -->
+      <!-- RIGHT: Restock + Transfer to shop + history + returns -->
       <div>
         <div class="card" style="margin-bottom:18px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -120,6 +120,15 @@
         <div class="card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">📋 Transfer History</h3>
           <div id="history-table"><div class="empty-state">Loading...</div></div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin:0;">↩️ Returns</h3>
+            <button class="secondary" onclick="loadReturns()" style="font-size:0.8rem; padding:5px 10px;">Refresh</button>
+          </div>
+          <p style="color:var(--muted); font-size:0.85rem; margin:0 0 8px;">Stock that came back from the lorry. Good stock is added back to store stock; damaged stock is written off.</p>
+          <div id="returns-table" style="max-height:340px; overflow-y:auto;"><div class="empty-state">Loading...</div></div>
         </div>
 
         <div class="card">
@@ -211,6 +220,7 @@
       document.getElementById('staff-name').textContent = `${currentStaff.full_name} (${currentStaff.role})`;
       renderNav();
       await Promise.all([loadStoreProducts(), loadHistory(), loadRestockHistory()]);
+      loadReturns();
       if (currentStaff.role === 'admin') {
         document.getElementById('report-card').style.display = '';
         document.getElementById('report-date').value = new Date().toISOString().slice(0, 10);
@@ -844,6 +854,37 @@
                   <td style="font-size:0.82rem;">${items || '—'}</td>
                   <td>Ksh ${Number(t.total_value || 0).toLocaleString()}</td>
                   <td><span class="pay-badge ${payClass}">${status}</span></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ─── RETURNS: everything that came back from the lorry, newest first ────
+    async function loadReturns() {
+      const el = document.getElementById('returns-table');
+      if (!navigator.onLine) { el.innerHTML = '<div class="empty-state">The returns list needs internet.</div>'; return; }
+      const { data, error } = await supabaseClient
+        .from('lorry_returns').select('*').order('created_at', { ascending: false }).limit(50);
+      if (error) { el.innerHTML = `<div class="empty-state">Error loading returns: ${escapeHtml(error.message)}</div>`; return; }
+      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No returns recorded yet.</div>'; return; }
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Status</th><th>Reason</th></tr></thead>
+          <tbody>
+            ${data.map(r => {
+              const p = storeProducts.find(x => x.id === r.store_product_id);
+              const status = r.condition === 'damaged' ? '<span style="color:#dc2626; font-weight:700;">Written off</span>'
+                : r.condition === 'good' ? '<span style="color:#059669; font-weight:700;">Back in store</span>' : '—';
+              const dateStr = new Date(r.created_at).toLocaleString('en-KE', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+              return `
+                <tr>
+                  <td style="font-size:0.82rem; white-space:nowrap;">${dateStr}</td>
+                  <td>${escapeHtml(p ? displayName(p) : (r.product_name || '—'))}</td>
+                  <td>${r.quantity}</td>
+                  <td>${status}</td>
+                  <td style="font-size:0.82rem;">${escapeHtml(r.reason || '—')}</td>
                 </tr>`;
             }).join('')}
           </tbody>
