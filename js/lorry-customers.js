@@ -7,6 +7,9 @@
    and to record a credit payment (shows credit before → after).
    Saving a delivery also takes the stock off the lorry and records the
    sales, so the Profit Report stays correct.
+   Customer details (name, phone, location, notes) can be edited with the
+   ✏️ Edit button on an open account. Needs the `notes` column and an UPDATE
+   policy on lorry_customer_ledger.
    Requires lorry-customer-ledger.sql (run once in Supabase).
 ------------------------------------------------------------------- */
 (function () {
@@ -249,10 +252,11 @@
     const map = {};
     (data || []).forEach(e => {
       const k = keyOf(e.customer_name);
-      const a = map[k] = map[k] || { key: k, name: e.customer_name, phone: '', location: '', entries: [], delivered: 0, paid: 0 };
+      const a = map[k] = map[k] || { key: k, name: e.customer_name, phone: '', location: '', notes: '', entries: [], delivered: 0, paid: 0 };
       a.name = e.customer_name;
       if (e.phone) a.phone = e.phone;
       if (e.location) a.location = e.location;
+      if (e.notes) a.notes = e.notes;
       a.entries.push(e);
       if (e.entry_type === 'delivery') a.delivered += Number(e.amount); else a.paid += Number(e.amount);
     });
@@ -346,9 +350,43 @@
         <td>${fmtDate(e.created_at)}</td><td>${e.entry_type === 'delivery' ? 'Order' : 'Paid ' + (e.method === 'mpesa' ? 'M-Pesa' : 'Cash')}</td><td>${money(e.amount)}</td>
         <td style="white-space:nowrap;"><button class="secondary" onclick="custEditEntry('${e.id}')">✎</button> <button class="secondary" onclick="custDeleteEntry('${e.id}')">✕</button></td></tr>`).join('')}</tbody></table></details>` : '';
 
+    // Contact details shown under the customer's name
+    const contact = [
+      a.phone ? '📞 ' + escapeHtml(a.phone) : '',
+      a.location ? '📍 ' + escapeHtml(a.location) : ''
+    ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    const notesLine = a.notes
+      ? `<div style="font-size:0.85rem; margin-top:4px; white-space:pre-wrap;">📝 ${escapeHtml(a.notes)}</div>` : '';
+
+    const fieldStyle = 'width:100%; box-sizing:border-box; font:inherit; padding:8px; border-radius:6px; border:1px solid var(--border, #33455c); background:transparent; color:inherit;';
+    const editForm = `<div id="cust-edit-form" style="display:none; border:1px dashed var(--border, #33455c); border-radius:8px; padding:10px; margin-bottom:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:150px;"><label>Customer name *</label>
+          <input type="text" id="ce-name" value="${escapeAttr(a.name)}"></div>
+        <div class="field" style="flex:1; min-width:130px;"><label>Phone</label>
+          <input type="tel" id="ce-phone" value="${escapeAttr(a.phone)}" placeholder="e.g. 0712 345 678"></div>
+        <div class="field" style="flex:1; min-width:130px;"><label>Location</label>
+          <input type="text" id="ce-location" value="${escapeAttr(a.location)}" placeholder="e.g. Kasarani, Mwiki"></div>
+      </div>
+      <div class="field"><label>Notes / extra information</label>
+        <textarea id="ce-notes" rows="3" style="${fieldStyle}" placeholder="e.g. Pays on Fridays, shop near the stage, second contact...">${escapeHtml(a.notes)}</textarea></div>
+      <div style="display:flex; gap:10px;">
+        <button onclick="custSaveEdit()" style="flex:1;">Save Customer</button>
+        <button class="secondary" onclick="custToggleEdit()" style="flex:1;">Cancel</button>
+      </div>
+      <p class="error-text" id="ce-err" style="display:none;"></p>
+    </div>`;
+
     return `<div style="border:1px solid var(--border, #33455c); border-radius:8px; padding:12px; margin-bottom:12px;">
-      <div style="font-weight:800; font-size:1.05rem;">${escapeHtml(a.name)}</div>
-      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">${a.location ? '📍 ' + escapeHtml(a.location) : ''}</div>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+        <div>
+          <div style="font-weight:800; font-size:1.05rem;">${escapeHtml(a.name)}</div>
+          <div style="color:var(--muted); font-size:0.8rem;">${contact || 'No phone or location saved yet'}</div>
+          ${notesLine}
+        </div>
+        <button class="secondary" onclick="custToggleEdit()" style="white-space:nowrap;">✏️ Edit</button>
+      </div>
+      ${editForm}
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
         ${tile('Total ordered', money(a.delivered))}
         ${tile('Paid — Cash', money(cash))}
@@ -396,6 +434,52 @@
           <td style="color:${a.balance > 0 ? '#c0392b' : '#1a7f37'}; font-weight:700;">${a.balance > 0 ? money(a.balance) : 'Cleared'}</td></tr>`).join('')}</tbody>
       </table></div>`;
   }
+
+  // ─── EDIT CUSTOMER DETAILS (name, phone, location, notes) ───
+  window.custToggleEdit = function () {
+    const f = document.getElementById('cust-edit-form');
+    if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  };
+
+  window.custSaveEdit = async function () {
+    const a = accounts.find(x => x.key === selectedKey);
+    if (!a) return;
+    const errEl = document.getElementById('ce-err');
+    errEl.style.display = 'none';
+    const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
+
+    const name = document.getElementById('ce-name').value.trim();
+    const phone = document.getElementById('ce-phone').value.trim();
+    const location = document.getElementById('ce-location').value.trim();
+    const notes = document.getElementById('ce-notes').value.trim();
+    if (!name) return showErr('Customer name cannot be empty.');
+    if (!navigator.onLine) return showErr('Editing a customer needs internet.');
+
+    const newKey = keyOf(name);
+    if (newKey !== a.key && accounts.some(x => x.key === newKey)) {
+      if (!confirm(`A customer named "${name}" already exists.\n\nSaving will merge ${a.name}'s records into that account. Continue?`)) return;
+    }
+
+    // Every ledger row of this customer carries the same details
+    const oldNames = [...new Set(a.entries.map(e => e.customer_name))];
+    const patch = { customer_name: name, phone: phone || null, location: location || null, notes: notes || null };
+    const { data, error } = await supabaseClient
+      .from('lorry_customer_ledger').update(patch).in('customer_name', oldNames).select('id');
+    if (error) return showErr('Error: ' + error.message);
+    // With row-level security, a blocked update affects 0 rows without an error
+    if (!data || data.length < a.entries.length) {
+      return showErr(`Only ${data ? data.length : 0} of ${a.entries.length} records were updated. Check the UPDATE policy on lorry_customer_ledger, then try again.`);
+    }
+
+    // Keep the Profit Report's customer names in step after a rename (best effort)
+    if (oldNames.some(n => n !== name)) {
+      await supabaseClient.from('lorry_sales').update({ customer_name: name }).in('customer_name', oldNames);
+    }
+
+    selectedKey = newKey;
+    await loadCustomers();
+    if (typeof loadProfitReport === 'function') loadProfitReport();
+  };
 
   // ─── CUSTOMER PAYS CREDIT ───
   window.custPayPreview = function () {
