@@ -126,11 +126,11 @@
         </div>
       </div>
 
-      <!-- RIGHT: Returns + past sales + profit report -->
+      <!-- RIGHT: Returns + profit report -->
       <div>
-        <div class="card" style="margin-bottom:18px;">
-          <h3 style="margin-top:0;">↩️ Record a Return</h3>
-          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">This is the only outcome you need to log by hand — anything not returned here is treated as sold when you close the route.</p>
+        <div class="card" id="returns-card" style="margin-bottom:18px;">
+          <h3 style="margin-top:0;">↩️ Returns</h3>
+          <p style="color:var(--muted); font-size:0.85rem; margin-top:-8px;">Record stock that came back from the lorry. Good stock goes back into store stock; damaged stock is written off. Every return is listed below.</p>
           <div class="field">
             <label>Product</label>
             <input type="text" id="return-product-search" list="return-product-options" placeholder="Type to search product..." autocomplete="off">
@@ -146,8 +146,20 @@
             </select>
           </div>
           <div class="field"><label>Reason (optional)</label><input type="text" id="return-reason" placeholder="e.g. Unsold end of day, or how it got damaged"></div>
-          <button class="secondary" onclick="recordReturn()" style="width:100%;">Return to Store</button>
+          <button onclick="recordReturn()" style="width:100%;">Return to Store</button>
           <p class="error-text" id="return-error" style="display:none;"></p>
+
+          <h4 style="margin:16px 0 6px;">Recent returns</h4>
+          <div id="returns-list" style="max-height:340px; overflow-y:auto;"><div class="empty-state">Loading...</div></div>
+        </div>
+
+        <div class="card" id="issues-card" style="margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h3 style="margin:0;">🚚 Shop → Lorry Transfers</h3>
+            <button class="secondary" onclick="loadLorryIssues()" style="font-size:0.8rem; padding:5px 10px;">Refresh</button>
+          </div>
+          <p style="color:var(--muted); font-size:0.85rem; margin:0 0 8px;">Stock sent from the shop to the lorry, newest first.</p>
+          <div id="issues-list" style="max-height:340px; overflow-y:auto;"><div class="empty-state">Loading...</div></div>
         </div>
 
         <div class="card">
@@ -222,6 +234,8 @@
       document.getElementById('profit-report-date').addEventListener('change', loadProfitReport);
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
       loadProfitReport();
+      loadReturns();
+      loadLorryIssues();
     })();
 
     function renderNav() {
@@ -296,7 +310,7 @@
       if (!qty || qty <= 0) { errorEl.textContent = 'Please enter a valid quantity.'; errorEl.style.display = 'block'; return; }
       if (!navigator.onLine) { errorEl.textContent = 'Recording a return needs internet (it updates live store stock).'; errorEl.style.display = 'block'; return; }
 
-      const { error } = await supabaseClient.rpc('record_lorry_return', {
+      const { error } = await supabaseClient.rpc('record_store_return', {
         p_store_product_id: productId, p_quantity: qty, p_reason: reason || null, p_staff_id: currentStaff.id, p_condition: condition
       });
       if (error) { errorEl.textContent = 'Error: ' + error.message; errorEl.style.display = 'block'; return; }
@@ -307,7 +321,68 @@
       document.getElementById('return-condition').value = 'good';
       document.getElementById('return-reason').value = '';
       await Promise.all([loadStoreProducts(), loadLorryStock()]);
-      alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — removed from lorry, not added back to store stock.');
+      await loadReturns();
+      alert(condition === 'good' ? '✅ Return recorded — stock is back in the store.' : '✅ Damaged stock recorded — written off, not added back to store stock.');
+    }
+
+    // ─── SHOP → LORRY TRANSFERS: every load recorded in lorry_issues, newest first ──
+    async function loadLorryIssues() {
+      const el = document.getElementById('issues-list');
+      if (!el) return;
+      if (!navigator.onLine) { el.innerHTML = '<div class="empty-state">This list needs internet.</div>'; return; }
+      const { data, error } = await supabaseClient
+        .from('lorry_issues').select('*').order('created_at', { ascending: false }).limit(50);
+      if (error) { el.innerHTML = `<div class="empty-state">Error loading transfers: ${escapeHtml(error.message)}</div>`; return; }
+      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No transfers to the lorry yet.</div>'; return; }
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${data.map(r => {
+              const p = storeProducts.find(x => x.id === r.store_product_id);
+              return `
+              <tr>
+                <td>${fmtStamp(r.created_at, true)}</td>
+                <td>${escapeHtml(p ? displayName(p) : (r.product_name || '—'))}</td>
+                <td>${r.quantity}</td>
+                <td>${escapeHtml(r.notes || '—')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    // ─── RETURNS LIST: every return recorded, newest first ──
+    async function loadReturns() {
+      const el = document.getElementById('returns-list');
+      if (!el) return;
+      if (!navigator.onLine) { el.innerHTML = '<div class="empty-state">The returns list needs internet.</div>'; return; }
+      const { data, error } = await supabaseClient
+        .from('lorry_returns').select('*').order('created_at', { ascending: false }).limit(50);
+      if (error) { el.innerHTML = `<div class="empty-state">Error loading returns: ${escapeHtml(error.message)}</div>`; return; }
+      if (!data || !data.length) { el.innerHTML = '<div class="empty-state">No returns recorded yet.</div>'; return; }
+
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Status</th><th>Reason</th></tr></thead>
+          <tbody>
+            ${data.map(r => {
+              const p = storeProducts.find(x => x.id === r.store_product_id);
+              const cond = r.condition || (r.damaged ? 'damaged' : '');
+              const status = cond === 'damaged' ? '<span style="color:#c0392b; font-weight:700;">Written off</span>'
+                : cond === 'good' ? '<span style="color:#1a7f37; font-weight:700;">Back in store</span>' : '—';
+              return `
+              <tr>
+                <td>${fmtStamp(r.created_at, true)}</td>
+                <td>${escapeHtml(p ? displayName(p) : (r.product_name || '—'))}</td>
+                <td>${r.quantity}</td>
+                <td>${status}</td>
+                <td>${escapeHtml(r.reason || r.notes || '—')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
     }
 
     // ─── LORRY PROFIT REPORT (daily, gross profit only — expenses are handled weekly in js/lorry-weekly.js) ──
