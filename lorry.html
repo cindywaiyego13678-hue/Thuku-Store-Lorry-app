@@ -60,6 +60,17 @@
     margin-top: 4px;
   }
   .ledger-profit-row .ledger-profit-num { font-weight: 800; }
+  .ledger-sale {
+    display: grid;
+    grid-template-columns: minmax(170px, 1.3fr) 1fr 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 2px 0;
+  }
+  .ledger-sale .ledger-label { white-space: normal; }
+  .ledger-sale .ledger-meta { font-weight: 400; font-size: 0.85rem; color: var(--muted, #8ea0b6); white-space: normal; }
+  .ledger-sale .ledger-actions { white-space: nowrap; font-family: inherit; }
+  .ledger-sale .ledger-actions button { padding: 2px 8px; font-size: 0.75rem; }
   .report-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
   .report-toolbar .field { margin:0; }
   .report-toolbar button { white-space:nowrap; }
@@ -564,24 +575,29 @@
         </div>
       `;
 
+      const isAdmin = currentStaff.role === 'admin';
       salesListEl.innerHTML = `
-        <h4 style="margin-bottom:6px;">Sales List</h4>
-        <table>
-          <thead><tr><th>${multi ? 'Date / Time' : 'Time'}</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Customer</th><th>Payment</th>${currentStaff.role === 'admin' ? '<th></th>' : ''}</tr></thead>
-          <tbody>
-            ${sales.map(s => `
-                <tr>
-                  <td>${fmtStamp(s.created_at, multi)}</td>
-                  <td>${escapeHtml(saleLabel(s))}</td>
-                  <td>${s.quantity}</td>
-                  <td>Ksh ${Number(s.unit_price).toLocaleString()}</td>
-                  <td>Ksh ${(Number(s.unit_price) * Number(s.quantity)).toLocaleString()}</td>
-                  <td>${escapeHtml(s.customer_name || 'Walk-in')}</td>
-                  <td>${escapeHtml(s.payment_method || '—')}</td>
-                  ${currentStaff.role === 'admin' ? `<td style="white-space:nowrap;"><button class="secondary" onclick="openEditSale('${s.id}')">Edit / Return</button> <button class="secondary" onclick="deleteLorrySale('${s.id}')">Delete</button></td>` : ''}
-                </tr>`).join('')}
-          </tbody>
-        </table>
+        <div class="ledger-summary">
+          <div class="ledger-title">Sales List ${label}</div>
+          ${sales.map(s => {
+            const p = s.store_products;
+            let lbl = [p?.size, p?.density, p?.manufacturer].filter(Boolean).join(' ');
+            if (!lbl) lbl = p?.name || s.product_name || 'Unknown';
+            const total = Number(s.unit_price) * Number(s.quantity);
+            return `
+              <div class="ledger-sale">
+                <span class="ledger-label">- ${escapeHtml(lbl)}</span>
+                <span class="ledger-calc">${s.quantity} x ${Math.round(Number(s.unit_price)).toLocaleString()}<span class="arrow">→</span>${Math.round(total).toLocaleString()}</span>
+                <span class="ledger-meta">${fmtStamp(s.created_at, multi)} · ${escapeHtml(s.customer_name || 'Walk-in')} · ${escapeHtml(s.payment_method || '—')}</span>
+                <span class="ledger-actions">${isAdmin ? `<button class="secondary" onclick="openEditSale('${s.id}')">Edit</button> <button class="secondary" onclick="deleteLorrySale('${s.id}')">Delete</button>` : ''}</span>
+              </div>`;
+          }).join('')}
+          <div class="ledger-totals" style="grid-template-columns: minmax(170px, 1.3fr) 1fr 1fr auto;">
+            <span class="ledger-qty-total">${itemsSold} total</span>
+            <span class="ledger-totals-num">${Math.round(revenue).toLocaleString()}</span>
+            <span></span><span></span>
+          </div>
+        </div>
       `;
     }
 
