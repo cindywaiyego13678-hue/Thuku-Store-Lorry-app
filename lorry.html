@@ -195,6 +195,27 @@
     </div>
   </div>
 
+  <!-- Edit / Return modal for a sale in the Lorry Profit Report -->
+  <div id="edit-sale-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div class="card" style="width:100%; max-width:380px; margin:0;">
+      <h3 style="margin-top:0;">✏️ Edit / Return</h3>
+      <p id="edit-sale-name" style="font-weight:700; margin:0 0 4px;"></p>
+      <p style="color:var(--muted); font-size:0.85rem; margin:0 0 12px;">Currently counted as sold: <b id="edit-sale-current"></b></p>
+      <div class="field"><label>Quantity returned (deduct from sold)</label>
+        <input type="number" id="edit-sale-returned" min="0" step="any" placeholder="0 if none">
+      </div>
+      <div class="field"><label>Unit price (Ksh)</label>
+        <input type="number" id="edit-sale-price" min="0" step="any">
+      </div>
+      <p style="color:var(--muted); font-size:0.8rem; margin:0 0 10px;">Store and lorry stock are not changed.</p>
+      <div style="display:flex; gap:10px;">
+        <button onclick="saveEditSale()" style="flex:1;">Save</button>
+        <button class="secondary" onclick="closeEditSale()" style="flex:1;">Cancel</button>
+      </div>
+      <p class="error-text" id="edit-sale-error" style="display:none;"></p>
+    </div>
+  </div>
+
   <script src="js/offline-cache.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/lorry-offline-sync.js"></script>
@@ -601,7 +622,7 @@
                   <td>Ksh ${(Number(s.unit_price) * Number(s.quantity)).toLocaleString()}</td>
                   <td>${escapeHtml(s.customer_name || 'Walk-in')}</td>
                   <td>${escapeHtml(s.payment_method || '—')}</td>
-                  ${currentStaff.role === 'admin' ? `<td><button class="secondary" onclick="deleteLorrySale('${s.id}')">Delete</button></td>` : ''}
+                  ${currentStaff.role === 'admin' ? `<td style="white-space:nowrap;"><button class="secondary" onclick="openEditSale('${s.id}')">Edit / Return</button> <button class="secondary" onclick="deleteLorrySale('${s.id}')">Delete</button></td>` : ''}
                 </tr>`).join('')}
           </tbody>
         </table>
@@ -1039,6 +1060,61 @@
       if (!confirm('Delete this sale? (Stock is not changed.)')) return;
       const { error } = await supabaseClient.from('lorry_sales').delete().eq('id', id);
       if (error) { alert('Error deleting sale: ' + error.message); return; }
+      await loadProfitReport();
+    }
+
+    // ─── EDIT / RETURN on a saved sale (from the Lorry Profit Report's Sales List) ──
+    let editingSaleId = null;
+
+    function openEditSale(id) {
+      const s = currentReport?.sales.find(x => x.id === id);
+      if (!s) return;
+      editingSaleId = id;
+      document.getElementById('edit-sale-name').textContent = saleLabel(s);
+      document.getElementById('edit-sale-current').textContent = s.quantity;
+      document.getElementById('edit-sale-returned').value = '';
+      document.getElementById('edit-sale-price').value = s.unit_price;
+      document.getElementById('edit-sale-error').style.display = 'none';
+      document.getElementById('edit-sale-modal').style.display = 'flex';
+    }
+
+    function closeEditSale() {
+      editingSaleId = null;
+      document.getElementById('edit-sale-modal').style.display = 'none';
+    }
+
+    async function saveEditSale() {
+      const errorEl = document.getElementById('edit-sale-error');
+      const showErr = (m) => { errorEl.textContent = m; errorEl.style.display = 'block'; };
+      errorEl.style.display = 'none';
+
+      const s = currentReport?.sales.find(x => x.id === editingSaleId);
+      if (!s) return showErr('Sale not found. Close this and try again.');
+      if (!navigator.onLine) return showErr('Editing a sale needs internet.');
+
+      const returned = parseFloat(document.getElementById('edit-sale-returned').value) || 0;
+      const price = parseFloat(document.getElementById('edit-sale-price').value);
+      const current = Number(s.quantity);
+
+      if (returned < 0) return showErr('Returned quantity cannot be negative.');
+      if (returned > current) return showErr(`Returned (${returned}) is more than the ${current} counted as sold.`);
+      if (isNaN(price) || price < 0) return showErr('Enter a valid unit price.');
+
+      const newQty = Math.round((current - returned) * 10000) / 10000;
+
+      if (newQty === 0) {
+        if (!confirm('Everything was returned, so this sale will be removed from the report. Continue?')) return;
+        const { error } = await supabaseClient.from('lorry_sales').delete().eq('id', s.id);
+        if (error) return showErr('Error: ' + error.message);
+      } else {
+        const { data, error } = await supabaseClient
+          .from('lorry_sales').update({ quantity: newQty, unit_price: price }).eq('id', s.id).select();
+        if (error) return showErr('Error: ' + error.message);
+        // With row-level security, a blocked update affects 0 rows without an error
+        if (!data || !data.length) return showErr('Update was blocked by database permissions (add an UPDATE policy on lorry_sales).');
+      }
+
+      closeEditSale();
       await loadProfitReport();
     }
 
