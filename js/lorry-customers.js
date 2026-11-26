@@ -113,7 +113,7 @@
     <div id="cust-detail"></div>
     <div id="cust-list"><div class="empty-state">Loading...</div></div>
   `;
-  const leftCol = document.getElementById('close-route-payment').closest('.card').parentNode;
+  const leftCol = document.querySelector('.lorry-layout > div');
   card.style.marginTop = '18px'; card.style.marginBottom = '0';
   const bulkCard = document.getElementById('bulk-date') && document.getElementById('bulk-date').closest('.card');
   if (bulkCard && bulkCard.parentNode === leftCol) leftCol.insertBefore(card, bulkCard); else leftCol.appendChild(card);
@@ -698,7 +698,7 @@
 
   // ─── WIRING ───
   const origRender = window.renderLorryStock;
-  window.renderLorryStock = function () { origRender.apply(this, arguments); renderItems(); };
+  window.renderLorryStock = function () { if (origRender) origRender.apply(this, arguments); renderItems(); };
 
   const wait = setInterval(() => {
     if (typeof currentStaff !== 'undefined' && currentStaff) { clearInterval(wait); loadCustomers(); }
