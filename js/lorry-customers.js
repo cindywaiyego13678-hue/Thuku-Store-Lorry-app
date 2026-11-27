@@ -314,13 +314,14 @@
       return `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px solid var(--border, #33455c);">
         <span style="min-width:120px; font-weight:700;">${isDel ? 'Order' : 'Payment'}${isDel && e.items && e.items.length ? ' <small style="font-weight:400;">(product list stays)</small>' : ''}</span>
         <input type="number" id="cde-amt-${e.id}" value="${e.amount}" min="0" step="any" style="width:120px;">
+        <input type="date" id="cde-date-${e.id}" value="${localISO(new Date(e.created_at))}" style="width:150px;">
         ${isDel ? '' : `<select id="cde-via-${e.id}"><option value="cash"${e.method === 'mpesa' ? '' : ' selected'}>Cash</option><option value="mpesa"${e.method === 'mpesa' ? ' selected' : ''}>M-Pesa</option></select>`}
         <button class="secondary" onclick="custDeleteEntry('${e.id}')">Delete</button>
       </div>`;
     }).join('');
     return `<div id="cust-day-box" style="border:2px solid var(--border, #33455c); border-radius:8px; padding:10px; margin-top:10px;">
       <div style="font-weight:800; margin-bottom:4px;">✏️ Correct ${fmtDate(openDay + 'T12:00:00')}</div>
-      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:6px;">Change the amounts and press Save. Entered twice by mistake? Delete the extra entry.</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:6px;">Change the amount or the date and press Save. Entered twice by mistake? Delete the extra entry.</div>
       ${rows}
       <div style="display:flex; gap:10px; margin-top:10px;">
         <button onclick="custSaveDay('${openDay}')" style="flex:1;">Save changes</button>
@@ -347,11 +348,19 @@
       if (!amt || amt <= 0) { alert('Every amount must be more than 0. To remove an entry, use Delete.'); return; }
       const viaEl = document.getElementById('cde-via-' + e.id);
       const method = viaEl ? viaEl.value : e.method;
+      const newDay = document.getElementById('cde-date-' + e.id).value;
+      if (!newDay) { alert('Every entry needs a date.'); return; }
       const diff = amt - Number(e.amount);
       if (e.entry_type === 'delivery') delivered += diff; else paid += diff;
-      if (diff !== 0 || (viaEl && method !== (e.method || 'cash'))) {
+      const dateChanged = newDay !== day;
+      if (diff !== 0 || dateChanged || (viaEl && method !== (e.method || 'cash'))) {
         const patch = { amount: amt };
         if (viaEl) patch.method = method;
+        if (dateChanged) {
+          const orig = new Date(e.created_at);
+          const [y, m, d] = newDay.split('-').map(Number);
+          patch.created_at = new Date(y, m - 1, d, orig.getHours(), orig.getMinutes(), orig.getSeconds()).toISOString();
+        }
         changes.push({ id: e.id, patch });
       }
     }
@@ -362,6 +371,7 @@
     const results = await Promise.all(changes.map(ch =>
       supabaseClient.from('lorry_customer_ledger').update(ch.patch).eq('id', ch.id).select('id')));
     const bad = results.find(r => r.error || !r.data || !r.data.length);
+    openDay = '';
     await loadCustomers();
     if (bad) { alert('Error: ' + (bad.error ? bad.error.message : 'the update was blocked by database permissions.')); return; }
     alert('✅ Day corrected.');
