@@ -17,6 +17,7 @@
   let custQty = {}, custPrice = {};
   let deliveryTotal = 0;
   let selectedKey = '';   // customer account currently open
+  let openDay = '';       // day (YYYY-MM-DD) whose entries are open for correction (admin)
 
   const money = (n) => 'Ksh ' + Math.round(Number(n) || 0).toLocaleString();
   const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -267,10 +268,11 @@
     renderAccounts();
   };
 
-  window.custPick = function () { selectedKey = document.getElementById('cust-pick').value; renderAccounts(); };
+  window.custPick = function () { selectedKey = document.getElementById('cust-pick').value; openDay = ''; renderAccounts(); };
   window.custSelectIdx = function (i) {
     if (!accounts[i]) return;
     selectedKey = accounts[i].key;
+    openDay = '';
     renderAccounts();
     document.getElementById('cust-pick').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
@@ -301,6 +303,70 @@
     return Object.values(days).sort((x, y) => x.day.localeCompare(y.day));
   }
 
+  // ─── CORRECT A DAY (admin): change amounts or delete a double entry ───
+  function dayPanelHtml(a) {
+    if (!openDay) return '';
+    const list = a.entries.filter(e => localISO(new Date(e.created_at)) === openDay)
+      .sort((x, y) => new Date(x.created_at) - new Date(y.created_at));
+    if (!list.length) return '';
+    const rows = list.map(e => {
+      const isDel = e.entry_type === 'delivery';
+      return `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px solid var(--border, #33455c);">
+        <span style="min-width:120px; font-weight:700;">${isDel ? 'Order' : 'Payment'}${isDel && e.items && e.items.length ? ' <small style="font-weight:400;">(product list stays)</small>' : ''}</span>
+        <input type="number" id="cde-amt-${e.id}" value="${e.amount}" min="0" step="any" style="width:120px;">
+        ${isDel ? '' : `<select id="cde-via-${e.id}"><option value="cash"${e.method === 'mpesa' ? '' : ' selected'}>Cash</option><option value="mpesa"${e.method === 'mpesa' ? ' selected' : ''}>M-Pesa</option></select>`}
+        <button class="secondary" onclick="custDeleteEntry('${e.id}')">Delete</button>
+      </div>`;
+    }).join('');
+    return `<div id="cust-day-box" style="border:2px solid var(--border, #33455c); border-radius:8px; padding:10px; margin-top:10px;">
+      <div style="font-weight:800; margin-bottom:4px;">✏️ Correct ${fmtDate(openDay + 'T12:00:00')}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:6px;">Change the amounts and press Save. Entered twice by mistake? Delete the extra entry.</div>
+      ${rows}
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button onclick="custSaveDay('${openDay}')" style="flex:1;">Save changes</button>
+        <button class="secondary" onclick="custToggleDay('')" style="flex:1;">Close</button>
+      </div>
+    </div>`;
+  }
+
+  window.custToggleDay = function (day) {
+    openDay = (openDay === day) ? '' : day;
+    renderAccounts();
+    if (openDay) { const box = document.getElementById('cust-day-box'); if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  };
+
+  window.custSaveDay = async function (day) {
+    const a = accounts.find(x => x.key === selectedKey);
+    if (!a) return;
+    const dayEntries = a.entries.filter(e => localISO(new Date(e.created_at)) === day);
+    const changes = [];
+    let delivered = a.delivered, paid = a.paid;
+
+    for (const e of dayEntries) {
+      const amt = parseFloat(document.getElementById('cde-amt-' + e.id).value);
+      if (!amt || amt <= 0) { alert('Every amount must be more than 0. To remove an entry, use Delete.'); return; }
+      const viaEl = document.getElementById('cde-via-' + e.id);
+      const method = viaEl ? viaEl.value : e.method;
+      const diff = amt - Number(e.amount);
+      if (e.entry_type === 'delivery') delivered += diff; else paid += diff;
+      if (diff !== 0 || (viaEl && method !== (e.method || 'cash'))) {
+        const patch = { amount: amt };
+        if (viaEl) patch.method = method;
+        changes.push({ id: e.id, patch });
+      }
+    }
+    if (!changes.length) { alert('Nothing was changed.'); return; }
+    if (paid > delivered) { alert('After these changes the payments would be more than the total ordered. Check the amounts.'); return; }
+    if (!navigator.onLine) { alert('Editing needs internet.'); return; }
+
+    const results = await Promise.all(changes.map(ch =>
+      supabaseClient.from('lorry_customer_ledger').update(ch.patch).eq('id', ch.id).select('id')));
+    const bad = results.find(r => r.error || !r.data || !r.data.length);
+    await loadCustomers();
+    if (bad) { alert('Error: ' + (bad.error ? bad.error.message : 'the update was blocked by database permissions.')); return; }
+    alert('✅ Day corrected.');
+  };
+
   function detailHtml(a) {
     const canDelete = currentStaff && currentStaff.role === 'admin';
     const tl = timeline(a);
@@ -320,7 +386,8 @@
       return `<tr>
         <td>${fmtDate(d.day + 'T12:00:00')}</td><td>${prods}</td>
         <td>${d.ordered ? money(d.ordered) : '—'}</td><td>${d.cash ? money(d.cash) : '—'}</td><td>${d.mpesa ? money(d.mpesa) : '—'}</td>
-        <td>${chg}</td><td style="font-weight:700;">${money(d.end)}</td></tr>`;
+        <td>${chg}</td><td style="font-weight:700;">${money(d.end)}</td>
+        ${canDelete ? `<td><button class="secondary" onclick="custToggleDay('${d.day}')">✎ Fix</button></td>` : ''}</tr>`;
     }).join('');
 
     const creditPays = tl.filter(t => t.e.entry_type === 'payment' && !t.e.paid_at_order);
@@ -396,8 +463,9 @@
 
       <h4 style="margin:6px 0;">📅 Day by day</h4>
       <div style="overflow-x:auto;"><table>
-        <thead><tr><th>Date</th><th>Products ordered</th><th>Ordered</th><th>Cash</th><th>M-Pesa</th><th>Credit change</th><th>Credit left</th></tr></thead>
+        <thead><tr><th>Date</th><th>Products ordered</th><th>Ordered</th><th>Cash</th><th>M-Pesa</th><th>Credit change</th><th>Credit left</th>${canDelete ? '<th></th>' : ''}</tr></thead>
         <tbody>${dayRows}</tbody></table></div>
+      <div id="cust-day-panel">${dayPanelHtml(a)}</div>
 
       <h4 style="margin:14px 0 6px;">💳 Customer pays credit</h4>
       ${payForm}
